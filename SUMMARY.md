@@ -46,6 +46,7 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | Mercury 2.5 | 55.66 | 87.1% |
 | DeepSeek V4.1 Flash | 47.50 | 83.7% |
 | **llama-jev + Qwen3.5-0.8B** | **4.11** | **64.0%** |
+| **llama-jev + Qwen3-VL-4B** | **0.11** | **73.3%** |
 
 ### score — HelpSteer2 (exact same 300 items)
 | system | Decision Score | accuracy |
@@ -55,6 +56,7 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | Gemini 3.8 Flash | 4.59 | 42.4% |
 | Qwen3.8 Flash | −1.43 | 36.1% |
 | **llama-jev + Qwen3.5-0.8B** | **−2.56** | **31.0%** |
+| **llama-jev + Qwen3-VL-4B** | **−39.61** | **44.3%** |
 | Mercury 2.5 | −5.55 | 41.7% |
 | Mistral Medium 3.5 | −13.73 | 43.9% |
 | DeepSeek V4.1 Flash | −19.04 | 34.7% |
@@ -73,6 +75,9 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | **llama-jev + Qwen3.5-0.8B (pointwise)** | **0.12** | **21.7%** |
 | chance | 0 | 1.3% |
 
+Note: the VL-4B was **not** run on the 77-way board (our grouped-10-way variant reached
+0.766 accuracy at n=500, but that is the grouped task, not comparable to 77-way).
+
 **Latency:** see the table below.
 
 ---
@@ -85,6 +90,8 @@ run logs (n=1500 each); llama-jev is measured live against llama-server (`bench/
 | system | PubMedQA | HelpSteer2 | Banking77 |
 |---|---|---|---|
 | **llama-jev + Qwen3-VL-2B** | **27 / 31 ms** | ~30 ms | **27 / 35 ms** |
+| **llama-jev + Qwen3-VL-4B** | 76 / 91 ms | 62 / 85 ms |
+| **llama-jev + Qwen3.5-4B** | 102 / 113 ms | 131 / 134 ms |
 | **llama-jev + Qwen3.5-0.8B** | 61 / 74 ms | ~65 ms | 65 / 68 ms |
 | Jev | 438 / 653 ms | 479 / 670 ms | 467 / 693 ms |
 | Mercury 2.5 | 584 / 1037 ms | 618 / 1165 ms | 639 / 1507 ms |
@@ -182,6 +189,13 @@ Monotone, so it never changes the argmax — only the confidence.
    badly overconfident (choice K=10 mean conf 0.915 at 0.620 accuracy; ECE 14.0 → 29.5), so
    Decision Score *falls* (−8 → −30). A single Platt/temperature parameter (`a ≈ 0.3`) fixes it
    (ECE 29.5 → 5.5). I.e. scale **plus** calibration/training, not scale alone.
+   The **Qwen3.5-4B** hybrid lands between: choice 10-group **0.736** (vs 2B 0.724) at
+   ~131 ms/item — same accuracy as the 2B dense, ~5× its latency; the hybrid arch costs
+   speed on this llama.cpp build.
+   The **dense Qwen3-VL-4B** (Q4_K_M) beats the same-size hybrid (Qwen3.5-4B) on both axes:
+   choice 10-group **0.766** vs 0.736 at **65 vs 131 ms/item** — on llama.cpp today the
+   dense transformer path is the right pick; the hybrid arch costs speed without buying
+   quality at this scale.
    The **35B-A3B MoE** (`Qwen3.6-35B-A3B UD-IQ4_NL`, item-exact boards, paired) closes
    most of the accuracy gap with zero training: PubMedQA **0.787** acc / **DS 39.1**
    (Jev 0.913 / 69.1), HelpSteer2 **0.427** acc (Jev 0.410) at ~1.4 s/decision on this

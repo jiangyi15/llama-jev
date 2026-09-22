@@ -61,25 +61,34 @@ Single call per decision, `chat` mode + question-first.
 **Bottom line:** the mechanics reproduce Jev, the *decisions* do not. A 0.8B model is far
 below Jev and every frontier LLM — but it is **~8× faster**.
 
-### Scaling the model: 0.8B → 2B → 35B-A3B
+### Scaling the model: 0.8B → 2B → 4B → 35B-A3B
 
 Same wrapper, same prompts, different base models. Accuracy on the balanced calibration
 sample (n=500) for the 0.8B/2B rows; the 35B rows are on the **item-exact boards** above.
 
-| metric | 0.8B | 2B | **35B-A3B (MoE)** |
-|---|---|---|---|
-| choice, 10 groups (described) | 0.523 | 0.724 | **0.807** (chance 0.10) |
-| PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.787** |
-| HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.427** |
-| PubMedQA Decision Score | 4.11 | −21.67 | **39.07** |
-| HelpSteer2 Decision Score | −2.56 | −33.74 | **−1.16** |
-| two-stage, end-to-end | 0.164 | 0.461 | not run |
+| metric | 0.8B | 2B | VL-4B | **35B-A3B (MoE)** |
+|---|---|---|---|---|
+| choice, 10 groups (described) | 0.523 | 0.724 | **0.766** | **0.807** (chance 0.10) |
+| PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.733** | **0.787** |
+| HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.443** | **0.427** |
+| PubMedQA Decision Score | 4.11 | −21.67 | **0.11** | **39.07** |
+| HelpSteer2 Decision Score | −2.56 | −33.74 | **−39.61** | **−1.16** |
+| two-stage, end-to-end | 0.164 | 0.461 | not run | not run |
 
 *(Jev on the same boards: PubMedQA 0.913 / 69.06, HelpSteer2 0.410 / 9.28, Banking77 0.797 / 67.79.)*
 
 **What this shows:** a 35B-A3B MoE with zero training already **matches Jev's accuracy on
 HelpSteer2** (0.427 vs 0.410) and closes most of PubMedQA (78.7% vs 91.3%) — with our
-prompting, no decision training. Decision Score still trails (−1.2 vs 9.3 on HelpSteer2)
+prompting, no decision training. And the **dense VL-4B beats the same-size hybrid
+(Qwen3.5-4B)** on both accuracy (0.766 vs 0.736) and latency (65 vs 131 ms/item) —
+on llama.cpp today, dense transformers are the right pick; the hybrid arch costs
+speed without buying quality at this scale.
+
+The **VL-4B on the item-exact boards**: PubMedQA accuracy 0.733 (best local), HelpSteer2
+**0.443 — above Jev's 0.410** — and choice K=5 at **0.920** (ECE 4.4, well-calibrated).
+Its raw confidences are heavily overconfident though (mean 0.95+), so its **Decision
+Scores collapse** (−39.6 on HelpSteer2) until a single Platt parameter is fitted:
+HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_probs.py`). Decision Score still trails (−1.2 vs 9.3 on HelpSteer2)
 because its confidence is a bit overconfident; and its 77-way intent knowledge was never
 trained. Latency: ~1.3–1.6 s/decision on this laptop (only 10/40 layers fit in the 8 GB GPU;
 a desktop GPU would change this) — still slower than Jev's ~440 ms median.
@@ -88,7 +97,8 @@ a desktop GPU would change this) — still slower than Jev's ~440 ms median.
 wildly overconfident (mean confidence 0.92 at 0.62 accuracy), so the Decision Score *falls*
 (choice K=10 DS −8 → −30). One Platt/temperature parameter (`q = sigmoid(a·logit(p)+b)`, fitted
 `a ≈ 0.3`) restores calibration (ECE 29.5 → 5.5). This is the concrete version of the earlier
-point: you need **scale + training/calibration**, not scale alone.
+point: you need **scale + training/calibration**, not scale alone. Same for the VL-4B:
+one Platt parameter (a ≈ 0.1–0.5) pulls its ECE back to 1.4–6.9 everywhere.
 
 ### Latency
 
@@ -98,6 +108,8 @@ Median / p95 per decision. Jev/LLM figures are from the `seconds` field of Jeval
 | system | PubMedQA median / p95 | Banking77 median / p95 |
 |---|---|---|
 | **llama-jev + Qwen3-VL-2B** | **27 / 31 ms** | **27 / 35 ms** |
+| **llama-jev + Qwen3-VL-4B** | 76 / 91 ms | 62 / 85 ms |
+| **llama-jev + Qwen3.5-4B (hybrid)** | 102 / 113 ms | 131 / 134 ms |
 | **llama-jev + Qwen3.5-0.8B** | 61 / 74 ms | 65 / 68 ms |
 | Jev | 438 / 653 ms | 467 / 693 ms |
 | Mercury 2.5 (fastest LLM) | 584 / 1037 ms | 639 / 1507 ms |

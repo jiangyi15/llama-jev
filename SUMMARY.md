@@ -31,6 +31,9 @@ the published board exactly for every system.
 (base `Qwen/Qwen3.5-0.8B`, vision-language, hybrid Gated Delta Net + sparse MoE), unsloth
 **Unsloth Dynamic 2.0** GGUF at quant **`UD-Q4_K_XL`** (~4-bit, 559 MB); NVIDIA RTX 3070 Ti
 Laptop 8 GB (Ampere) + Ryzen 7 6800H; llama.cpp `b8818`, 4 slots, `-c 8192`.
+A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://modelscope.cn/models/unsloth/Qwen3-VL-2B-GGUF/)
+(dense transformer, 1.05 GB) and **Qwen3.6-35B-A3B UD-IQ4_NL** (18 GB MoE, 3B active,
+10/40 layers on the 8 GB GPU — ~1.3–1.6 s/decision on this laptop).
 
 ### noul — PubMedQA
 | system | Decision Score | accuracy |
@@ -42,7 +45,7 @@ Laptop 8 GB (Ampere) + Ryzen 7 6800H; llama.cpp `b8818`, 4 slots, `-c 8192`.
 | Mistral Medium 3.5 | 58.03 | 88.8% |
 | Mercury 2.5 | 55.66 | 87.1% |
 | DeepSeek V4.1 Flash | 47.50 | 83.7% |
-| **llama-jev + Qwen3.5-0.8B** | **6.42** | **62.3%** |
+| **llama-jev + Qwen3.5-0.8B** | **4.11** | **64.0%** |
 
 ### score — HelpSteer2 (exact same 300 items)
 | system | Decision Score | accuracy |
@@ -81,7 +84,8 @@ run logs (n=1500 each); llama-jev is measured live against llama-server (`bench/
 
 | system | PubMedQA | HelpSteer2 | Banking77 |
 |---|---|---|---|
-| **llama-jev + Qwen3.5-0.8B** | **55 / 67 ms** | ~60 ms | **63 / 70 ms** |
+| **llama-jev + Qwen3-VL-2B** | **27 / 31 ms** | ~30 ms | **27 / 35 ms** |
+| **llama-jev + Qwen3.5-0.8B** | 61 / 74 ms | ~65 ms | 65 / 68 ms |
 | Jev | 438 / 653 ms | 479 / 670 ms | 467 / 693 ms |
 | Mercury 2.5 | 584 / 1037 ms | 618 / 1165 ms | 639 / 1507 ms |
 | Mistral Medium 3.5 | 534 / 917 ms | 706 / 1179 ms | 937 / 1458 ms |
@@ -90,9 +94,11 @@ run logs (n=1500 each); llama-jev is measured live against llama-server (`bench/
 | Gemini 3.8 Flash | 1854 / 5541 ms | 1888 / 3980 ms | 1636 / 3938 ms |
 | GLM-5.3 | 1758 / 2879 ms | 2211 / 3632 ms | 2111 / 3186 ms |
 
-- Local is **~8× faster than Jev** (median) and ~10–30× faster than the frontier LLMs.
-- Concurrency: `JEV_MAX_WORKERS=4` raises per-call latency (~193 ms) but improves throughput
-  to **~49 ms/item** (vs ~64 ms at 1 worker).
+- Local is **~8–16× faster than Jev** (median) and ~10–30× faster than the frontier LLMs.
+- Concurrency: `JEV_MAX_WORKERS=4` raises per-call latency (~200 ms) but improves throughput
+  to **~50 ms/item (0.8B)** / **~23 ms/item (2B)**.
+- The 2B VL model is faster than the 0.8B on this llama.cpp build — the Qwen3.5 hybrid
+  (Gated Delta Net + MoE) kernels are newer and less optimised than the dense path.
 
 ---
 
@@ -170,6 +176,20 @@ Monotone, so it never changes the argmax — only the confidence.
    other. Only the **system prompt** (choice) and **option descriptions** are consistent
    levers — bracket style and line breaks are not.
 
+9. **Scale buys accuracy, not calibration.** Swapping the 0.8B for `Qwen3-VL-2B-Instruct-1M
+   IQ4_NL` (same wrapper/prompts): choice 10-group 0.523 → **0.724**, two-stage 0.164 →
+   **0.461**, IMDB noul 0.766 → **0.886**, HelpSteer2 0.309 → 0.361. But the raw softmax is
+   badly overconfident (choice K=10 mean conf 0.915 at 0.620 accuracy; ECE 14.0 → 29.5), so
+   Decision Score *falls* (−8 → −30). A single Platt/temperature parameter (`a ≈ 0.3`) fixes it
+   (ECE 29.5 → 5.5). I.e. scale **plus** calibration/training, not scale alone.
+   The **35B-A3B MoE** (`Qwen3.6-35B-A3B UD-IQ4_NL`, item-exact boards, paired) closes
+   most of the accuracy gap with zero training: PubMedQA **0.787** acc / **DS 39.1**
+   (Jev 0.913 / 69.1), HelpSteer2 **0.427** acc (Jev 0.410) at ~1.4 s/decision on this
+   laptop — and its Decision Score is far better than the smaller models because its
+   confidences are closer to calibrated (0.833 mean vs 0.787 acc).
+
+10. **Vision: a capability Jev doesn't have.** Qwen3-VL-2B + its mmproj projector accepts image input; the same grammar single-token probability readout works on images. Rendering customer messages to PNGs and classifying them into the 10 groups gives accuracy **0.75–0.775** at ~63 ms median (image encoding included) — comparable to text. Jev is text-only ("no image or audio input at launch"), so this is a genuine extension. (`bench/latency_image.py`)
+
 ---
 
 ## 6. Implementation
@@ -199,8 +219,9 @@ Layout: `jev_server.py` + `simple_jev.py` at the root, tests in `tests/`, analys
 - **Model is the ceiling** — a 0.8B model is far below Jev/frontier; the API mechanics are
   correct, the signal is weak.
 - **Many-option choice** needs pointwise/regroup/two-stage, and still calibrates poorly.
-- **Not identical items** for PubMedQA (same dataset + class balance, different rows) and
-  Banking77 (277/300 aligned); HelpSteer2 is exact.
+- **Item coverage:** HelpSteer2 and PubMedQA are **item-exact** (300/300; PubMedQA
+  reconstructed from the HF revision `9001f285` by `state_sha256`, fetched via
+  `hf-mirror.com`); Banking77 is paired on the 277/300 items we could align.
 - **Pointwise cost** = one call per option (77× for Banking77).
 - **Prompt settings are model-specific** — system prompt, label style, layout, and Platt
   parameters were all fitted/measured on Qwen3.5-0.8B Q4; a different model may prefer

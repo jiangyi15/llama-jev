@@ -123,6 +123,13 @@ def run_local(items: list[tuple[str, int]], question: dict, cfg: jev.Config,
     return [p for p, _ in results], [t for _, t in results]
 
 
+def load_pubmedqa_exact() -> list[tuple[str, int]]:
+    """The exact 300 states Jev ran (reconstructed from the HF revision by sha256)."""
+    path = os.path.join(DATA, "pubmedqa_hf", "exact_items.jsonl")
+    rows = [json.loads(line) for line in open(path, encoding="utf-8")]
+    return [(r["state"], int(r["target"])) for r in rows]
+
+
 def load_pubmedqa(n_yes: int, n_no: int, seed: int) -> list[tuple[str, int]]:
     ori = json.load(open(os.path.join(DATA, "pubmedqa", "data", "ori_pqal.json"), encoding="utf-8"))
     yes = [v for v in ori.values() if v["final_decision"] == "yes"]
@@ -187,7 +194,11 @@ def main() -> int:
     if "pubmedqa" in tasks:
         pm_suite = json.load(open(os.path.join(SUITE, "pubmedqa.json")))
         pm_q = {"type": "noul", "instructions": pm_suite["instructions"], "criteria": pm_suite["criteria"]}
-        pm_items = load_pubmedqa(186, 114, args.seed)
+        exact = os.path.join(DATA, "pubmedqa_hf", "exact_items.jsonl")
+        if os.path.exists(exact):
+            pm_items = load_pubmedqa_exact()
+        else:
+            pm_items = load_pubmedqa(186, 114, args.seed)
         pm_probs, pm_targets = run_local(pm_items, pm_q, cfg,
                                          lambda a: [1.0 - a["noul"], a["noul"]], args.workers)
         report["pubmedqa"] = {"local": grade(pm_probs, pm_targets, brier),

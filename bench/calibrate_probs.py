@@ -119,7 +119,12 @@ def cv_scores(p, y, fitter, folds=5):
 
 
 def main() -> int:
-    data = json.load(open(os.path.join(DATA, "calibration.json")))
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in", dest="src", default=os.path.join(DATA, "calibration.json"))
+    ap.add_argument("--out", dest="dst", default=os.path.join(DATA, "calibration_fits.json"))
+    args = ap.parse_args()
+    data = json.load(open(args.src))
     out = {}
     for task, d in data.items():
         p = np.array(d["confidence"], float)
@@ -146,9 +151,9 @@ def main() -> int:
             row["methods"][name] = {"cv": scores, "params": stored}
         out[task] = row
 
-    with open(os.path.join(DATA, "calibration_fits.json"), "w", encoding="utf-8") as handle:
+    with open(args.dst, "w", encoding="utf-8") as handle:
         json.dump(out, handle, indent=2)
-    print(f"\nwrote {os.path.join(DATA, 'calibration_fits.json')}")
+    print(f"\nwrote {args.dst}")
     return 0
 
 

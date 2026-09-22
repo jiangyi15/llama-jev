@@ -69,6 +69,15 @@ Environment
 ``JEV_QUESTION_FIRST``  ``1`` to put the question before the state (default 0)
 ``JEV_SYSTEM``          chat system message. Default: a format guide for
                         ``choice`` questions; set to override ("" disables).
+``JEV_CHOICE_STRATEGY`` ``grammar`` one pick, or ``pointwise`` score each option
+                        with a yes/no question and pick the highest (default grammar)
+``JEV_POINTWISE_INSTRUCTIONS`` match question used by the pointwise strategy
+
+Vision (capability Jev doesn't have): pass an ``image`` (data URL or file path) —
+per question or at the top level — with ``JEV_MODE=chat`` and a vision model
+loaded with ``--mmproj``. The same grammar single-token probability readout
+works on images:
+  {"state": "...", "image": "/tmp/ticket.png", "questions": {...}}
 ``JEV_THINKING``        ``1`` to let reasoning models think first (default 0)
 ``JEV_CHOICE_STRATEGY`` ``grammar`` one pick, or ``pointwise`` score each option
                         with a yes/no question and pick the highest (default grammar)
@@ -90,6 +99,7 @@ Then::
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
 import os
@@ -240,6 +250,7 @@ class ResolvedQuestion:
     labels: list[str]    # values reported back to the caller
     texts: list[str]     # how each option is written into the prompt
     instructions: str
+    image: str | None = None   # optional image (data URL / file path), chat mode only
 
 
 def _noul_option(description: str, word: str) -> str:
@@ -253,6 +264,14 @@ def _noul_option(description: str, word: str) -> str:
     if not desc:
         return word
     return desc if desc.lower().startswith(word) else f"{word}: {desc}"
+
+
+def _clean_image(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise BadRequest("'image' must be a non-empty string (data URL or file path)")
+    return value.strip()
 
 
 def resolve_question(question: dict[str, Any]) -> ResolvedQuestion:
@@ -269,13 +288,15 @@ def resolve_question(question: dict[str, Any]) -> ResolvedQuestion:
             raise BadRequest("choice.criteria must map at least two option -> description")
         labels = [str(k) for k in criteria.keys()]
         texts = [f"{k}: {criteria[k]}" if criteria[k] else str(k) for k in criteria.keys()]
-        return ResolvedQuestion(qtype, labels, texts, instructions)
+        return ResolvedQuestion(qtype, labels, texts, instructions,
+                                _clean_image(question.get("image")))
 
     if qtype == "score":
         if not isinstance(criteria, list) or len(criteria) < 2:
             raise BadRequest("score.criteria must be an ordered list of at least two levels")
         labels = [str(level) for level in criteria]
-        return ResolvedQuestion(qtype, labels, list(labels), instructions)
+        return ResolvedQuestion(qtype, labels, list(labels), instructions,
+                                _clean_image(question.get("image")))
 
     if qtype == "noul":
         true_desc = false_desc = ""
@@ -287,7 +308,8 @@ def resolve_question(question: dict[str, Any]) -> ResolvedQuestion:
         # Jev's criteria text ("Yes: …" / "No: …") is used verbatim; bare
         # descriptions get a "yes:"/"no:" prefix (see _noul_option).
         texts = [_noul_option(true_desc, "yes"), _noul_option(false_desc, "no")]
-        return ResolvedQuestion(qtype, ["yes", "no"], texts, instructions)
+        return ResolvedQuestion(qtype, ["yes", "no"], texts, instructions,
+                                _clean_image(question.get("image")))
 
     raise BadRequest(f"unknown question type: {qtype!r} (expected choice, score or noul)")
 
@@ -468,23 +490,120 @@ def _render_prompt(state: str, q: ResolvedQuestion, cfg: Config) -> str:
     return build_prompt(state, q.instructions, q.texts, cfg)
 
 
+def _system_and_instruction(q: ResolvedQuestion, cfg: Config) -> tuple[str, str]:
+    """Resolve the chat system prompt and the in-message instruction.
+
+    For ``choice`` the format rule lives in the system message (a measured win);
+    it is not repeated in the user message. ``noul``/``score`` have no system
+    message, so they carry the instruction inline.
+    """
+    if cfg.system_prompt is not None:
+        return cfg.system_prompt, "Answer with a single letter."
+    if q.qtype == "choice":
+        return DEFAULT_CHAT_SYSTEM, ""
+    return "", "Answer with a single letter."
+
+
+def _image_data_url(image: str) -> str:
+    """Accept a data URL or a file path; return a data URL for the image."""
+    image = image.strip()
+    if image.startswith("data:"):
+        return image
+    if os.path.exists(image):
+        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".webp": "image/webp", ".gif": "image/gif",
+                }.get(os.path.splitext(image)[1].lower(), "image/png")
+        b64 = base64.b64encode(open(image, "rb").read()).decode()
+        return f"data:{mime};base64,{b64}"
+    raise BadRequest("'image' must be a data URL or an existing file path")
+
+
+def _chat_messages(state: str, q: ResolvedQuestion, cfg: Config,
+                   system: str, instruction: str) -> list[dict[str, Any]]:
+    """Build the chat messages; with an image the user content becomes parts."""
+    content = build_chat_content(state, q.instructions, q.texts, cfg, instruction)
+    parts: list[dict[str, Any]] = [{"type": "text", "text": content}]
+    if q.image:
+        parts.append({"type": "image_url", "image_url": {"url": _image_data_url(q.image)}})
+    messages: list[dict[str, Any]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": parts if q.image else content})
+    return messages
+
+
+def _chat_completion(messages: list[dict[str, Any]], cfg: Config, grammar: str,
+                     n_probs: int) -> tuple[dict[str, Any], int]:
+    """One-token OpenAI-style completion with logprobs (needed for images),
+    normalised into the same shape the native ``/completion`` path produces."""
+    payload = {
+        "messages": messages,
+        "max_tokens": 1,              # exactly one token
+        "temperature": 1.0,           # keep the true softmax shape
+        "top_k": 0, "top_p": 1.0, "min_p": 0.0,   # don't drop small options
+        "logprobs": True,
+        "top_logprobs": n_probs,
+        "grammar": grammar,           # force a single option letter
+        "stream": False,
+    }
+    r = _post_json(cfg.llama_url.rstrip("/") + "/v1/chat/completions", payload, cfg.timeout)
+    choice = (r.get("choices") or [{}])[0]
+    content = str((choice.get("message") or {}).get("content") or "")
+    first = ((choice.get("logprobs") or {}).get("content") or [{}])[0]
+    top = []
+    for entry in first.get("top_logprobs") or []:
+        token = str(entry.get("token", ""))
+        try:
+            prob = math.exp(float(entry.get("logprob", -1e30)))
+        except (OverflowError, ValueError):
+            prob = 0.0
+        top.append({"token": token, "prob": prob})
+    tokens = int((r.get("usage") or {}).get("prompt_tokens") or 0)
+    return {"completion_probabilities": [{"token": content, "top_probs": top}]}, tokens
+
+
 def _pick_probs(state: str, q: ResolvedQuestion, cfg: Config) -> tuple[list[float], int]:
     """Option probabilities for one question, plus prompt tokens used.
 
-    Tries a grammar-constrained single token first; if the backend cannot honour
-    the grammar (or returns nothing usable) it retries without it and matches
-    token surface forms tolerantly.
+    Text questions try a grammar-constrained single token via the native
+    ``/completion``; questions with an ``image`` go through the multimodal
+    chat endpoint. If the backend cannot honour the grammar (or returns
+    nothing usable) both retry without it and match token surface forms
+    tolerantly.
     """
     n = len(q.labels)
     if n > len(cfg.letters):
         raise BadRequest(f"too many options ({n}); increase JEV_LETTERS")
+    if q.image and cfg.mode != "chat":
+        raise BadRequest("'image' requires JEV_MODE=chat")
+    n_probs = max(cfg.n_probs, n + 16)
+    grammar = _grammar(cfg.letters[:n])
+
+    if q.image:
+        system, instruction = _system_and_instruction(q, cfg)
+        messages = _chat_messages(state, q, cfg, system, instruction)
+        response: dict[str, Any] | None = None
+        probs: list[float] | None = None
+        tokens = 0
+        try:
+            response, tokens = _chat_completion(messages, cfg, grammar, n_probs)
+            probs = option_probabilities(response, n, cfg.letters, strict=True)
+        except BackendError:
+            probs = None
+        if probs is None:   # backend may not apply the grammar to images; retry bare
+            response, tokens = _chat_completion(messages, cfg, grammar="", n_probs=n_probs)
+            probs = option_probabilities(response, n, cfg.letters, strict=False)
+        if probs is None or response is None:
+            raise BackendError("no usable token probabilities for the image request")
+        return probs, tokens
+
     prompt = _render_prompt(state, q, cfg)
     n_probs = max(cfg.n_probs, n + 16)
 
     probs: list[float] | None = None
     response: dict[str, Any] | None = None
     try:
-        response = call_llama(prompt, cfg, grammar=_grammar(cfg.letters[:n]), n_probs=n_probs)
+        response = call_llama(prompt, cfg, grammar=grammar, n_probs=n_probs)
         probs = option_probabilities(response, n, cfg.letters, strict=True)
     except BackendError:
         probs = None
@@ -559,8 +678,12 @@ def handle_decisions(payload: dict[str, Any], cfg: Config) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise BadRequest("request body must be a JSON object")
     state = payload.get("state")
+    top_image = payload.get("image")
+    if top_image is not None and not isinstance(top_image, str):
+        raise BadRequest("'image' must be a string (data URL or file path)")
     if not isinstance(state, str) or not state.strip():
-        raise BadRequest("'state' must be a non-empty string")
+        # an image-only request is fine; the image carries the content
+        state = ""
 
     questions = payload.get("questions")
     if questions is None:
@@ -575,6 +698,9 @@ def handle_decisions(payload: dict[str, Any], cfg: Config) -> dict[str, Any]:
             raise BadRequest("'questions' is required (or provide 'question' + 'options')")
     if not isinstance(questions, dict) or not questions:
         raise BadRequest("'questions' must be a non-empty object")
+    if top_image:
+        questions = {k: ({"image": top_image, **v} if isinstance(v, dict) else v)
+                     for k, v in questions.items()}
 
     def run(item: tuple[str, dict[str, Any]]) -> tuple[str, dict[str, Any], int]:
         key, question = item

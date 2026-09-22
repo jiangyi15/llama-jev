@@ -50,16 +50,45 @@ Single call per decision, `chat` mode + question-first.
 
 | task | Jev | best LLM | **llama-jev + Qwen3.5-0.8B** |
 |---|---|---|---|
-| `noul` — PubMedQA (yes/no) | 69.0 / 91.3% | Gemini 73.0 / 92.5% | **6.4 / 62.3%** |
+| `noul` — PubMedQA (yes/no) | 69.0 / 91.3% | Gemini 73.0 / 92.5% | **4.1 / 64.0%** |
 | `score` — HelpSteer2 (0–4) | 9.2 / 41.3% | GLM 7.8 / 43.0% | **−2.6 / 31.0%** |
 | `choice` — Banking77 (77) | 67.8 / 79.7% | Gemini 74.1 / 84.6% | **−8.1 / 2.5%** |
 | `choice` — Banking77, pointwise | — | — | **0.1 / 21.7%** |
 
-*(Decision Score / accuracy. HelpSteer2 uses the exact same 300 items; Banking77 the same
-277; PubMedQA same dataset + class balance.)*
+*(Decision Score / accuracy. All three boards are **item-exact**: HelpSteer2 300/300, PubMedQA
+300/300 (reconstructed from the HF revision by `state_sha256`), Banking77 277/300 aligned.)*
 
 **Bottom line:** the mechanics reproduce Jev, the *decisions* do not. A 0.8B model is far
 below Jev and every frontier LLM — but it is **~8× faster**.
+
+### Scaling the model: 0.8B → 2B → 35B-A3B
+
+Same wrapper, same prompts, different base models. Accuracy on the balanced calibration
+sample (n=500) for the 0.8B/2B rows; the 35B rows are on the **item-exact boards** above.
+
+| metric | 0.8B | 2B | **35B-A3B (MoE)** |
+|---|---|---|---|
+| choice, 10 groups (described) | 0.523 | 0.724 | **0.807** (chance 0.10) |
+| PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.787** |
+| HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.427** |
+| PubMedQA Decision Score | 4.11 | −21.67 | **39.07** |
+| HelpSteer2 Decision Score | −2.56 | −33.74 | **−1.16** |
+| two-stage, end-to-end | 0.164 | 0.461 | not run |
+
+*(Jev on the same boards: PubMedQA 0.913 / 69.06, HelpSteer2 0.410 / 9.28, Banking77 0.797 / 67.79.)*
+
+**What this shows:** a 35B-A3B MoE with zero training already **matches Jev's accuracy on
+HelpSteer2** (0.427 vs 0.410) and closes most of PubMedQA (78.7% vs 91.3%) — with our
+prompting, no decision training. Decision Score still trails (−1.2 vs 9.3 on HelpSteer2)
+because its confidence is a bit overconfident; and its 77-way intent knowledge was never
+trained. Latency: ~1.3–1.6 s/decision on this laptop (only 10/40 layers fit in the 8 GB GPU;
+a desktop GPU would change this) — still slower than Jev's ~440 ms median.
+
+**Scale buys accuracy, not calibration.** The 2B is far more accurate but its raw softmax is
+wildly overconfident (mean confidence 0.92 at 0.62 accuracy), so the Decision Score *falls*
+(choice K=10 DS −8 → −30). One Platt/temperature parameter (`q = sigmoid(a·logit(p)+b)`, fitted
+`a ≈ 0.3`) restores calibration (ECE 29.5 → 5.5). This is the concrete version of the earlier
+point: you need **scale + training/calibration**, not scale alone.
 
 ### Latency
 
@@ -68,15 +97,41 @@ Median / p95 per decision. Jev/LLM figures are from the `seconds` field of Jeval
 
 | system | PubMedQA median / p95 | Banking77 median / p95 |
 |---|---|---|
-| **llama-jev + Qwen3.5-0.8B** | **55 / 67 ms** | **63 / 70 ms** |
+| **llama-jev + Qwen3-VL-2B** | **27 / 31 ms** | **27 / 35 ms** |
+| **llama-jev + Qwen3.5-0.8B** | 61 / 74 ms | 65 / 68 ms |
 | Jev | 438 / 653 ms | 467 / 693 ms |
 | Mercury 2.5 (fastest LLM) | 584 / 1037 ms | 639 / 1507 ms |
 | DeepSeek V4.1 Flash | 838 / 1123 ms | 999 / 1311 ms |
 | Gemini 3.8 Flash (slowest) | 1854 / 5541 ms | 1636 / 3938 ms |
 
-- Local is **~8× faster than Jev** (median) and ~10–30× faster than the LLMs.
-- With `JEV_MAX_WORKERS=4` the per-call latency rises (queuing) but **throughput improves to
-  ~49 ms/item** (from ~64 ms).
+- Local is **~8–16× faster than Jev** (median) and ~10–30× faster than the LLMs. Surprisingly
+  the 2B VL model is ~2× faster than the 0.8B on this llama.cpp build (newer hybrid
+  architecture, less optimised kernels).
+- With `JEV_MAX_WORKERS=4` the per-call latency rises (queuing) but **throughput improves**:
+  ~50 ms/item (0.8B), ~23 ms/item (2B).
+
+### Vision — a capability Jev doesn't have
+
+Jev is **text-only** ("no image or audio input at launch" per its docs). Because
+`llama-jev` runs on a vision-language model (Qwen3-VL-2B + its mmproj projector), it can
+decide on **images**: screenshots of tickets, photos of receipts or statements.
+
+Verified end-to-end: render a support ticket to a PNG, send it as a multimodal user message
+with the 10 category options and the grammar `root ::= [ABCDEFGHIJ]`, read the letter
+probabilities. Accuracy on the 10-group choice task: **0.75–0.78** (vs 0.72 text) at
+~63 ms median (1 worker) / ~52 ms/item (4 workers) — image encoding included.
+
+The wrapper accepts an optional `image` per question or at the top level
+(data URL or file path); it requires `JEV_MODE=chat` and a vision model loaded with
+`--mmproj`. Example:
+
+```json
+{"state": "", "image": "/tmp/ticket.png",
+ "questions": {"route": {"type": "choice", "instructions": "Which category?",
+                         "criteria": {"billing": "…", "technical": "…"}}}}
+```
+
+For text-only decisions on non-vision models this stays inert.
 
 ### Calibration — is the probability trustworthy?
 

@@ -44,6 +44,8 @@ class StubLlama(BaseHTTPRequestHandler):
     reject_grammar = False
     fail_grammar_probs = False
     requests_seen: list[dict] = []
+    chat_seen: list[dict] = []
+    chat_seen: list[dict] = []
 
     def log_message(self, format, *args):  # noqa: A002
         pass
@@ -59,6 +61,17 @@ class StubLlama(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path.rstrip("/").endswith("/v1/chat/completions"):
+            StubLlama.chat_seen.append(body)
+            m = re.search(r"\[([A-Za-z]+)\]", body.get("grammar") or "")
+            letters = list(m.group(1)) if m else ["A", "B"]
+            top = [{"token": letter, "logprob": math.log(1.0 / (i + 1))}
+                   for i, letter in enumerate(letters)]
+            self._send(200, {"choices": [{
+                "message": {"content": letters[0]},
+                "logprobs": {"content": [{"token": letters[0], "top_logprobs": top}]}}],
+                "usage": {"prompt_tokens": 10}})
+            return
         if self.path.rstrip("/").endswith("/apply-template"):
             content = body["messages"][-1]["content"]
             self._send(200, {"prompt": f"<chat>{content}</chat>"})
@@ -129,6 +142,7 @@ class JevUnitTests(unittest.TestCase):
         StubLlama.requests_seen = []
         StubLlama.reject_grammar = False
         StubLlama.fail_grammar_probs = False
+        StubLlama.chat_seen = []
         self.llama, _ = start_server(StubLlama)
         self.addCleanup(self.llama.shutdown)
         self.cfg = jev.Config(
@@ -274,6 +288,39 @@ class JevUnitTests(unittest.TestCase):
         self.assertIn("<chat>", StubLlama.requests_seen[0]["prompt"])
         self.assertEqual(StubLlama.requests_seen[0]["grammar"], "root ::= [AB]")
 
+    def test_image_requires_chat_mode(self):
+        cfg = jev.Config(llama_url=self.cfg.llama_url, model="test-jev", mode="raw")
+        with self.assertRaises(jev.BadRequest):
+            jev.handle_decisions(
+                {"state": "x", "image": "/tmp/ticket.png",
+                 "questions": {"q": {"type": "noul", "instructions": "urgent?",
+                                     "criteria": {"true": "", "false": ""}}}},
+                cfg)
+
+    def test_image_propagates_to_messages(self):
+        cfg = jev.Config(llama_url=self.cfg.llama_url, model="test-jev",
+                         mode="chat", question_first=True)
+        result = jev.handle_decisions(
+            {"state": "state text", "image": "data:image/png;base64,AAAA",
+             "questions": {"q": {"type": "noul", "instructions": "Is it urgent?",
+                                 "criteria": {"true": "urgent", "false": "not"}}}},
+            cfg,
+        )
+        self.assertAlmostEqual(result["answers"]["q"]["noul"], 2 / 3, places=5)
+        # the multimodal call went to the chat endpoint with image + text parts
+        chat_calls = [r for r in StubLlama.requests_seen
+                      if isinstance(r.get("messages"), list)]
+        self.assertEqual(len(StubLlama.chat_seen), 1)
+        parts = StubLlama.chat_seen[0]["messages"][-1]["content"]
+        self.assertEqual([p["type"] for p in parts], ["text", "image_url"])
+
+    def test_image_data_url_from_file(self):
+        import tempfile
+        path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+        url = jev._image_data_url(path)
+        self.assertTrue(url.startswith("data:image/png;base64,"))
+        os.remove(path)
+
     def test_pointwise_choice_scores_each_option(self):
         cfg = jev.Config(llama_url=self.cfg.llama_url, model="test-jev",
                          choice_strategy="pointwise", max_workers=1)
@@ -372,6 +419,7 @@ class JevHttpTests(unittest.TestCase):
         StubLlama.requests_seen = []
         StubLlama.reject_grammar = False
         StubLlama.fail_grammar_probs = False
+        StubLlama.chat_seen = []
         self.llama, _ = start_server(StubLlama)
         self.addCleanup(self.llama.shutdown)
         self.cfg = jev.Config(

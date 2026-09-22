@@ -1,0 +1,6 @@
+# datasets, cloned eval repos, and benchmark outputs
+data/
+
+# python caches
+__pycache__/
+*.py[cod]

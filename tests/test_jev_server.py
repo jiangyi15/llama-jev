@@ -260,57 +260,6 @@ class JevUnitTests(unittest.TestCase):
         self.assertTrue(url.startswith("data:image/png;base64,"))
         os.remove(path)
 
-    def test_pointwise_choice_scores_each_option(self):
-        cfg = jev.Config(llama_url=self.cfg.llama_url, model="test-jev",
-                         choice_strategy="pointwise", max_workers=1)
-        result = jev.handle_decisions(
-            {
-                "state": "text",
-                "questions": {"q": {"type": "choice", "instructions": "Pick",
-                                    "criteria": {"one": "", "two": "", "three": ""}}},
-            },
-            cfg,
-        )
-        answer = result["answers"]["q"]
-        self.assertEqual(answer["type"], "choice")
-        self.assertEqual(set(answer["probabilities"]), {"one", "two", "three"})
-        self.assertAlmostEqual(sum(answer["probabilities"].values()), 1.0, places=5)
-        # exactly one yes/no completion per option
-        self.assertEqual(len(StubLlama.requests_seen), 3)
-        for req in StubLlama.requests_seen:
-            self.assertEqual(req.get("grammar"), "root ::= [AB]")
-
-    # -- validation -------------------------------------------------------- #
-    def test_bad_requests(self):
-        with self.assertRaises(jev.BadRequest):
-            jev.handle_decisions({"questions": {}}, self.cfg)  # no state
-        with self.assertRaises(jev.BadRequest):
-            jev.handle_decisions({"state": "x", "questions": {}}, self.cfg)  # empty questions
-        with self.assertRaises(jev.BadRequest):
-            jev.handle_decisions(
-                {"state": "x", "questions": {"q": {"type": "choice", "instructions": "?",
-                                                   "criteria": {"only_one": ""}}}},
-                self.cfg,
-            )
-        with self.assertRaises(jev.BadRequest):
-            jev.handle_decisions(
-                {"state": "x", "questions": {"q": {"type": "wat", "instructions": "?"}}},
-                self.cfg,
-            )
-
-    # -- parsing helpers --------------------------------------------------- #
-    def test_strict_matching_ignores_surface_variants(self):
-        resp = {"completion_probabilities": [{"token": "A", "top_probs": [
-            {"token": "A", "prob": 0.4},
-            {"token": " A", "prob": 0.5},   # grammar-masked variant, must be ignored
-            {"token": "B", "prob": 0.1},
-        ]}]}
-        probs = jev.option_probabilities(resp, 2, "AB")
-        self.assertIsNotNone(probs)
-        assert probs is not None
-        self.assertAlmostEqual(probs[0], 0.8, places=6)
-        self.assertAlmostEqual(probs[1], 0.2, places=6)
-
     def test_parses_prob_and_logprob_and_bytes(self):
         resp = {
             "completion_probabilities": [

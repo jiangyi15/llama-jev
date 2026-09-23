@@ -5,7 +5,7 @@ One grammar-constrained token per decision; the next-token distribution over
 the option letters is the answer. Endpoints: ``POST /v1/systemone`` (alias
 ``/api/v1/decisions``), ``GET /health``, ``GET /v1/models``, OpenAPI at ``/docs``.
 
-Usage, configuration (env vars), capabilities (chat mode, images, pointwise,
+Usage, configuration (env vars), capabilities (chat mode, images,
 79-label alphabet) and the measured results: see ``README.md`` and ``SUMMARY.md``.
 """
 
@@ -62,8 +62,6 @@ class Config:
     question_first: bool = False   # put the question before the (long) state
     system_prompt: str | None = None  # chat system message; None = built-in default
     enable_thinking: bool = False  # disable reasoning for chat models
-    choice_strategy: str = "grammar"  # "grammar" (one pick) or "pointwise" (score each)
-    pointwise_instructions: str = "Does this option describe what the state is about?"
 
     @classmethod
     def from_env(cls, **overrides: Any) -> "Config":
@@ -79,8 +77,6 @@ class Config:
             question_first=_truthy(env.get("JEV_QUESTION_FIRST", "0")),
             system_prompt=env.get("JEV_SYSTEM"),
             enable_thinking=_truthy(env.get("JEV_THINKING", "0")),
-            choice_strategy=env.get("JEV_CHOICE_STRATEGY", cls.choice_strategy).lower(),
-            pointwise_instructions=env.get("JEV_POINTWISE_INSTRUCTIONS", cls.pointwise_instructions),
         )
         clean = {k: v for k, v in overrides.items() if v is not None}
         return replace(base, **clean) if clean else base
@@ -478,37 +474,9 @@ def shape_answer(q: ResolvedQuestion, probs: list[float]) -> dict[str, Any]:
     return {"type": "noul", "noul": round(probs[0], 6)}  # noul: P(yes), no confidence
 
 
-def _pointwise_score(state: str, instructions: str, option_text: str, cfg: Config) -> tuple[float, int]:
-    """P(option matches the state) via a yes/no question (few labels => low bias)."""
-    sub = resolve_question({
-        "type": "noul",
-        "instructions": cfg.pointwise_instructions,
-        "criteria": {"true": "the option matches", "false": "the option does not match"},
-    })
-    sub_state = f"Question: {instructions}\nCandidate option: {option_text}\n\nState:\n{state}"
-    probs, tokens = _pick_probs(sub_state, sub, cfg)
-    return probs[0], tokens
-
-
-def answer_choice_pointwise(state: str, q: ResolvedQuestion, cfg: Config) -> tuple[dict[str, Any], int]:
-    """Score every option independently, normalise, and pick the highest.
-
-    Avoids the first-option bias of asking a small model to pick among many
-    options at once: each call has only two labels (match / no match).
-    """
-    results = _map(lambda text: _pointwise_score(state, q.instructions, text, cfg),
-                   q.texts, cfg.max_workers)
-    scores = [score for score, _ in results]
-    total = sum(scores)
-    probs = [s / total for s in scores] if total > 0 else [1.0 / len(scores)] * len(scores)
-    return shape_answer(q, probs), sum(tokens for _, tokens in results)
-
-
 def answer_question(state: str, question: dict[str, Any], cfg: Config) -> tuple[dict[str, Any], int]:
     """Answer one question. Returns ``(answer, prompt_tokens_used)``."""
     q = resolve_question(question)
-    if q.qtype == "choice" and cfg.choice_strategy == "pointwise":
-        return answer_choice_pointwise(state, q, cfg)
     probs, tokens = _pick_probs(state, q, cfg)
     return shape_answer(q, probs), tokens
 
@@ -553,7 +521,7 @@ def handle_decisions(payload: dict[str, Any], cfg: Config) -> dict[str, Any]:
         "answers": {key: answer for key, answer, _ in results},
         "usage": {
             "input_tokens": sum(tokens for _, _, tokens in results),
-            # one reported decision per question; pointwise issues N completions
+            # one reported decision per question
             "output_tokens": len(results),
         },
     }

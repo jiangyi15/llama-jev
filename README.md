@@ -301,7 +301,7 @@ JEV_SYSTEM="Classify the state. Output exactly one letter (A, B, C, ...). No exp
 |---|---|
 | `jev_server.py` | the wrapper (engine + FastAPI app) |
 | `simple_jev.py` | minimal read-only reference (~40 lines) |
-| `tests/test_jev_server.py` | 22 tests with a stub llama-server |
+| `tests/test_jev_server.py` | 20 tests with a stub llama-server |
 | `bench/` | benchmarks, Jev comparison, calibration (see `bench/README`-style docstrings) |
 | `data/` | datasets, `jevals-data`, result JSONs |
 | `SUMMARY.md` | design notes + full benchmark/calibration detail |

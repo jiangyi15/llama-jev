@@ -17,9 +17,8 @@ grammar-constrained, normalised token distribution returned by llama-server's
 native ``/completion`` endpoint (``post_sampling_probs``).  No chat endpoint is
 required and no text is generated for the caller.
 
-If the backend does not support grammars, the server falls back to a plain
-single-token request with tolerant matching of surface variants (``" A"``,
-``"B."``, ...).
+GBNF grammar support is required — any current llama-server build provides it;
+there is no fallback.
 
 Endpoints
 ---------
@@ -123,11 +122,6 @@ DEFAULT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 SAFE_LETTERS = string.ascii_letters + string.digits + "!#$%&()*+/:;<=>?@"
 # Optional llama.cpp fields that older builds reject; dropped on a 400 retry.
 _OPTIONAL_COMPLETION_FIELDS = ("post_sampling_probs", "return_tokens", "cache_prompt")
-
-# Token text is stripped of surrounding whitespace and this punctuation before
-# matching it against an option letter (so " A", "A.", "A)" all match "A").
-_STRIP_CHARS = " \t\r\n.,:;)]}"
-
 
 class BackendError(RuntimeError):
     """Raised when llama-server cannot be reached or returns nothing usable."""
@@ -364,16 +358,6 @@ def call_llama(
         return _post_json(endpoint, payload, cfg.timeout)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:500]
-        # Older llama-server builds may not know an optional field; retry minimal.
-        if exc.code == 400 and any(
-            field in detail for field in ("post_sampling_probs", "return_tokens", "cache_prompt")
-        ):
-            for field in ("post_sampling_probs", "return_tokens", "cache_prompt"):
-                payload.pop(field, None)
-            try:
-                return _post_json(endpoint, payload, cfg.timeout)
-            except urllib.error.URLError as retry_exc:
-                raise BackendError(f"llama-server request failed: {retry_exc}") from retry_exc
         raise BackendError(f"llama-server HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise BackendError(f"cannot reach llama-server at {cfg.llama_url}: {exc}") from exc
@@ -408,33 +392,24 @@ def token_distribution(response: dict[str, Any]) -> list[tuple[str, float]]:
     return dist
 
 
-def _match_letter(token_text: str, letter: str, strict: bool = False) -> bool:
-    """Does ``token_text`` represent option ``letter``?
-
-    ``strict`` expects a bare single character — what a grammar-forced answer
-    emits.  The tolerant form additionally accepts surface variants such as
-    ``" A"`` or ``"B."`` for backends where no grammar could be applied.
-    """
-    if strict:
-        return token_text == letter
-    stripped = token_text.strip().strip(_STRIP_CHARS)
-    return len(stripped) == 1 and stripped.upper() == letter.upper()
+def _match_letter(token_text: str, letter: str) -> bool:
+    """Exact match — the grammar-constrained answer emits a bare option letter."""
+    return token_text == letter
 
 
 def option_probabilities(
-    response: dict[str, Any], n_options: int, letters: str, strict: bool = False
+    response: dict[str, Any], n_options: int, letters: str
 ) -> list[float] | None:
     """Renormalised probability per option, or ``None`` if no option matched.
 
-    With a grammar-constrained request (``strict=True``) the distribution only
-    contains the allowed letters, so matching is exact and no surface variants
-    leak in.
+    The distribution only contains the grammar-allowed letters, so matching is
+    exact and no surface variants leak in.
     """
     labels = letters[:n_options]
     totals = [0.0] * n_options
     for text, prob in token_distribution(response):
         for i, letter in enumerate(labels):
-            if _match_letter(text, letter, strict):
+            if _match_letter(text, letter):
                 totals[i] += prob
                 break
 
@@ -443,7 +418,7 @@ def option_probabilities(
         # Fall back to the sampled token if the distribution did not expose it.
         content = str(response.get("content", ""))
         for i, letter in enumerate(labels):
-            if _match_letter(content, letter, strict):
+            if _match_letter(content, letter):
                 totals = [0.0] * n_options
                 totals[i] = 1.0
                 total = 1.0
@@ -582,35 +557,16 @@ def _pick_probs(state: str, q: ResolvedQuestion, cfg: Config) -> tuple[list[floa
     if q.image:
         system, instruction = _system_and_instruction(q, cfg)
         messages = _chat_messages(state, q, cfg, system, instruction)
-        response: dict[str, Any] | None = None
-        probs: list[float] | None = None
-        tokens = 0
-        try:
-            response, tokens = _chat_completion(messages, cfg, grammar, n_probs)
-            probs = option_probabilities(response, n, cfg.letters, strict=True)
-        except BackendError:
-            probs = None
-        if probs is None:   # backend may not apply the grammar to images; retry bare
-            response, tokens = _chat_completion(messages, cfg, grammar="", n_probs=n_probs)
-            probs = option_probabilities(response, n, cfg.letters, strict=False)
-        if probs is None or response is None:
+        response, tokens = _chat_completion(messages, cfg, grammar, n_probs)
+        probs = option_probabilities(response, n, cfg.letters)
+        if probs is None:
             raise BackendError("no usable token probabilities for the image request")
         return probs, tokens
 
     prompt = _render_prompt(state, q, cfg)
-    n_probs = max(cfg.n_probs, n + 16)
-
-    probs: list[float] | None = None
-    response: dict[str, Any] | None = None
-    try:
-        response = call_llama(prompt, cfg, grammar=grammar, n_probs=n_probs)
-        probs = option_probabilities(response, n, cfg.letters, strict=True)
-    except BackendError:
-        probs = None
+    response = call_llama(prompt, cfg, grammar=grammar, n_probs=n_probs)
+    probs = option_probabilities(response, n, cfg.letters)
     if probs is None:
-        response = call_llama(prompt, cfg, n_probs=n_probs)
-        probs = option_probabilities(response, n, cfg.letters, strict=False)
-    if probs is None or response is None:
         raise BackendError(
             "llama-server returned no usable token probabilities for the option letters"
         )

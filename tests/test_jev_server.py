@@ -40,9 +40,6 @@ class StubLlama(BaseHTTPRequestHandler):
     """
 
     protocol_version = "HTTP/1.1"
-    # behaviour switches (set per-test)
-    reject_grammar = False
-    fail_grammar_probs = False
     requests_seen: list[dict] = []
     chat_seen: list[dict] = []
     chat_seen: list[dict] = []
@@ -80,10 +77,6 @@ class StubLlama(BaseHTTPRequestHandler):
         prompt = body.get("prompt", "")
         grammar = body.get("grammar")
 
-        if grammar and StubLlama.reject_grammar:
-            self._send(400, {"error": {"message": "unsupported field: grammar"}})
-            return
-
         if grammar:
             match = GRAMMAR_RE.search(grammar)
             letters = list(match.group(1)) if match else []
@@ -92,11 +85,6 @@ class StubLlama(BaseHTTPRequestHandler):
 
         weights = {letter: 0.6**i for i, letter in enumerate(letters)}
         total = sum(weights.values()) or 1.0
-
-        if grammar and StubLlama.fail_grammar_probs:
-            self._send(200, {"content": "", "tokens_evaluated": 7,
-                             "completion_probabilities": []})
-            return
 
         if grammar and body.get("post_sampling_probs"):
             top = [{"id": ord(letter), "token": letter, "prob": w / total}
@@ -140,8 +128,6 @@ def start_server(handler_cls, **attrs):
 class JevUnitTests(unittest.TestCase):
     def setUp(self):
         StubLlama.requests_seen = []
-        StubLlama.reject_grammar = False
-        StubLlama.fail_grammar_probs = False
         StubLlama.chat_seen = []
         self.llama, _ = start_server(StubLlama)
         self.addCleanup(self.llama.shutdown)
@@ -237,32 +223,7 @@ class JevUnitTests(unittest.TestCase):
             self.assertEqual(req.get("temperature"), 1.0)
             self.assertEqual(req.get("top_k"), 0)
 
-    def test_falls_back_when_grammar_rejected(self):
-        StubLlama.reject_grammar = True
-        result = jev.handle_decisions(
-            {
-                "state": "text",
-                "questions": {"q": {"type": "choice", "instructions": "Pick",
-                                    "criteria": {"one": "", "two": ""}}},
-            },
-            self.cfg,
-        )
-        self.assertEqual(result["answers"]["q"]["choice"], "one")
-        self.assertIn("grammar", StubLlama.requests_seen[0])
-        self.assertNotIn("grammar", StubLlama.requests_seen[-1])
-
-    def test_falls_back_when_grammar_probs_unusable(self):
-        StubLlama.fail_grammar_probs = True
-        result = jev.handle_decisions(
-            {
-                "state": "text",
-                "questions": {"q": {"type": "choice", "instructions": "Pick",
-                                    "criteria": {"one": "", "two": ""}}},
-            },
-            self.cfg,
-        )
-        self.assertEqual(result["answers"]["q"]["choice"], "one")
-        self.assertNotIn("grammar", StubLlama.requests_seen[-1])
+    # -- grammar forcing -------------------------------------------------- #
 
     def test_question_first_template_puts_question_first(self):
         cfg = jev.Config(question_first=True)
@@ -366,7 +327,7 @@ class JevUnitTests(unittest.TestCase):
             {"token": " A", "prob": 0.5},   # grammar-masked variant, must be ignored
             {"token": "B", "prob": 0.1},
         ]}]}
-        probs = jev.option_probabilities(resp, 2, "AB", strict=True)
+        probs = jev.option_probabilities(resp, 2, "AB")
         self.assertIsNotNone(probs)
         assert probs is not None
         self.assertAlmostEqual(probs[0], 0.8, places=6)
@@ -390,8 +351,8 @@ class JevUnitTests(unittest.TestCase):
         resp_log = {
             "completion_probabilities": [
                 {"token": "A", "logprob": math.log(0.3), "top_logprobs": [
-                    {"token": " A", "logprob": math.log(0.3)},
-                    {"token": "B.", "logprob": math.log(0.7)},
+                    {"token": "A", "logprob": math.log(0.3)},
+                    {"token": "B", "logprob": math.log(0.7)},
                 ]}
             ]
         }
@@ -417,8 +378,6 @@ class JevUnitTests(unittest.TestCase):
 class JevHttpTests(unittest.TestCase):
     def setUp(self):
         StubLlama.requests_seen = []
-        StubLlama.reject_grammar = False
-        StubLlama.fail_grammar_probs = False
         StubLlama.chat_seen = []
         self.llama, _ = start_server(StubLlama)
         self.addCleanup(self.llama.shutdown)

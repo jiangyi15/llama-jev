@@ -184,7 +184,11 @@ The system prompt helps `choice` (and IMDB `noul`) but **flips PubMedQA's yes/no
 (with no prompt: 99% yes-recall / 7% no-recall; with it: 17% / 91%), so it is applied by
 default **only to `choice`**. Override with `JEV_SYSTEM` (`""` disables).
 
-> **These prompt findings are model-dependent.** Every number here is measured on
+> **These prompt findings are model-dependent — verified by re-measurement.** The big
+> levers were found on **Qwen3.5-0.8B**; re-running the same sweeps on **Qwen3-VL-4B**
+> showed the format-guiding system prompt and the option-layout effects **disappear**
+> (all variants within noise), and the first-option bias is **absent** (option #0 picked
+> 7% vs 46-80% on the 0.8B). Every number here is measured on Qwen3.5-0.8B Q4 with its
 > **Qwen3.5-0.8B Q4** with its own chat template. A different model — size, family, chat
 > template, or quant — may prefer a **different** system prompt, option label style, or
 > layout (some models may even do worse with the format guide). Treat these as a method and a

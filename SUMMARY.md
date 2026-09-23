@@ -150,7 +150,10 @@ Monotone, so it never changes the argmax — only the confidence.
 > can differ — even invert — for other models, sizes, chat templates, or quants. Re-measure on
 > your target model with `bench/` rather than assuming these settings transfer.
 
-1. **A format-guiding system prompt is a big lever — for `choice`.** `"Classify the state. Output exactly one letter (A, B, C, ...). No explanation."` raises choice (10 groups) 0.29 -> **0.47** (n=500, p<0.001) and IMDB noul 0.78 -> **0.84**. It is now the **default for `choice` questions only**: on PubMedQA it merely flips the model's yes/no prior (no prompt: 99% yes-recall / 7% no-recall; with it: 17% / 91%), so it is not applied to `noul`/`score`. `JEV_SYSTEM` overrides ("" disables). Keeping the format rule **only in the system prompt** (not repeated in the user message) matters: the duplicate dropped choice from 0.535 to 0.415, so the wrapper omits the user-message instruction whenever a system prompt is present.
+1. **A format-guiding system prompt is a big lever — for `choice`.** `"Classify the state. Output exactly one letter (A, B, C, ...). No explanation."` raises choice (10 groups) 0.29 -> **0.47** (n=500, p<0.001) and IMDB noul 0.78 -> **0.84**. It is now the **default for `choice` questions only**: on PubMedQA it merely flips the model's yes/no prior (no prompt: 99% yes-recall / 7% no-recall; with it: 17% / 91%), so it is not applied to `noul`/`score`. `JEV_SYSTEM` overrides ("" disables).
+   Re-validated on the **VL-4B**: the lever disappears — all system-prompt variants land
+   within noise (choice 0.757-0.777, n=400; noul 0.905-0.925) — the 0.8B needed the format
+   guide, the 4B doesn't. The choice-default format guide is kept (harmless, slightly +). Keeping the format rule **only in the system prompt** (not repeated in the user message) matters: the duplicate dropped choice from 0.535 to 0.415, so the wrapper omits the user-message instruction whenever a system prompt is present.
 
 2. **Prompt format dominates.** Controlled sentiment set (n=60):
    | format | accuracy | AUC |
@@ -163,6 +166,9 @@ Monotone, so it never changes the argmax — only the confidence.
 3. **First-option / label bias.** Many-option choice picks by *position*: option #0 chosen
    **80%** (K=20) / **46%** (K=77); the same *intent* across shuffled orders **0%**;
    accuracy ≈ chance. Grammar forcing removes `" A"` surface variants but not the token prior.
+   Re-validated on the **VL-4B**: the bias is **absent** — option #0 picked 7% of the time
+   (vs 46-80% on the 0.8B), and shuffled-order accuracy reaches **0.267** at K=77 (20× chance).
+   The first-option collapse was a **0.8B-specific** failure, not a property of the readout.
 
 4. **Option count matters, but isn't the root cause.** top-1 by K: 0.40 (K=5), 0.15 (K=10),
    0.10 (K=20/40), 0.00 (K=77); even K=5 is only 2× chance.
@@ -186,7 +192,8 @@ Monotone, so it never changes the argmax — only the confidence.
    `A. a, B. b` default on both tasks**. `\n A.` is significantly *worse* (choice −4.2 pts,
    noul −14.5 pts); `(A)`/`A)` hurt noul; `[A]` and `\n Option A:` help one task and hurt the
    other. Only the **system prompt** (choice) and **option descriptions** are consistent
-   levers — bracket style and line breaks are not.
+   levers — bracket style and line breaks are not. Re-checked on the **VL-4B**: all label
+   styles and layouts are within noise there too (choice 0.748-0.770, noul 0.907-0.917).
 
 9. **Scale buys accuracy, not calibration.** Swapping the 0.8B for `Qwen3-VL-2B-Instruct-1M
    IQ4_NL` (same wrapper/prompts): choice 10-group 0.523 → **0.724**, two-stage 0.164 →

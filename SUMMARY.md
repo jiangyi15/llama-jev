@@ -217,6 +217,18 @@ Monotone, so it never changes the argmax — only the confidence.
    laptop — and its Decision Score is far better than the smaller models because its
    confidences are closer to calibrated (0.833 mean vs 0.787 acc).
 
+11. **Hand-built chat templates are model-specific — use /apply-template.** A hand-built
+    ChatML prompt (Qwen3-VL style) that scored 0.845 noul on the VL-2B scored **0.505 on the
+    35B** (Qwen3.6 template differs), while the wrapper's /apply-template path scored 0.925
+    on the same items. Templates must come from the model (the wrapper does this).
+
+12. **Shared-prefix workloads serialize on one slot.** With `-np 4`, sequential decisions
+    whose prompts share a long prefix (question-first: template+question+options are
+    identical) all route to the same slot via LCP matching — measured **4× slower** than
+    state-first prompts (145 vs 576 ms median on the 35B, n=200). Accuracy is unaffected.
+    For concurrent decision workloads, vary the prompt early or load-balance across
+    llama-server instances.
+
 10. **Vision: a capability Jev doesn't have.** Qwen3-VL-2B + its mmproj projector accepts image input; the same grammar single-token probability readout works on images. Rendering customer messages to PNGs and classifying them into the 10 groups gives accuracy **0.75–0.775** at ~63 ms median (image encoding included) — comparable to text. Jev is text-only ("no image or audio input at launch"), so this is a genuine extension. (`bench/latency_image.py`)
 
 ---

@@ -74,6 +74,7 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | **llama-jev + Qwen3.5-0.8B (listwise)** | **−8.14** | **2.5%** |
 | **llama-jev + Qwen3.5-0.8B (pointwise)** | **0.12** | **21.7%** |
 | **llama-jev + Qwen3-VL-4B (77-way, 79-label alphabet)** | **19.65** | **52.7%** |
+| **llama-jev + Qwen3.6-35B-A3B (77-way, 79-label alphabet)** | **50.75** | **68.2%** |
 | chance | 0 | 1.3% |
 
 The VL-4B's 77-way run uses the widened single-token alphabet (A-Z a-z 0-9 + safe

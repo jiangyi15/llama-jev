@@ -69,7 +69,7 @@ sample (n=500) for the 0.8B/2B rows; the 35B rows are on the **item-exact boards
 | metric | 0.8B | 2B | VL-4B | **35B-A3B (MoE)** |
 |---|---|---|---|---|
 | choice, 10 groups (described) | 0.523 | 0.724 | **0.766** | **0.807** (chance 0.10) |
-| choice, 77-way (Banking77 full board) | 0.025 | 0.025* | — | **0.527** (chance 0.013) |
+| choice, 77-way (Banking77 full board) | 0.025 | not run | **0.527** | **0.682** (chance 0.013) |
 | PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.733** | **0.787** |
 | HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.443** | **0.427** |
 | PubMedQA Decision Score | 4.11 | −21.67 | **0.11** | **39.07** |

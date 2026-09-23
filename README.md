@@ -100,7 +100,11 @@ HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_prob
 **0.682 / DS 50.75**, between Mercury 2.5 and Qwen3.8 Flash. Latency: ~1.3–1.6 s per
 decision on this laptop (only 10/40 layers fit in the 8 GB GPU; a desktop GPU would
 change this) — still slower than Jev's ~440 ms median, because the MoE weights are
-CPU-offloaded on this 8 GB card.
+CPU-offloaded on this 8 GB card. Pointwise (per-option yes/no) was re-checked here and
+**hurts at this scale**: 0.484 acc / DS 15.8 vs 0.682 / 50.75 listwise — its flat
+normalised distribution (mean confidence 0.20) wastes the Brier score, and isolated
+binary calls rank worse than the joint 77-way pick (sharpening recovers only
+DS ≈ 18). Pointwise is a small-model crutch, not a general strategy.
 
 **Scale buys accuracy, not calibration.** The 2B is far more accurate but its raw softmax is
 wildly overconfident (mean confidence 0.92 at 0.62 accuracy), so the Decision Score *falls*
@@ -144,7 +148,7 @@ probabilities. Accuracy on the 10-group choice task: **0.75–0.78** (vs 0.72 te
 ~63 ms median (1 worker) / ~52 ms/item (4 workers) — image encoding included.
 
 The wrapper accepts an optional `image` per question or at the top level
-(data URL or file path); it requires `JEV_MODE=chat` and a vision model loaded with
+(data URL or file path); it requires a vision model loaded with
 `--mmproj`. Example:
 
 ```json
@@ -214,7 +218,7 @@ cuts ECE 2–20× (PubMedQA 13.7 → 5.3, IMDB 15.3 → 3.9, HelpSteer2 4.9 → 
 | **Format-guiding system prompt** (`Output exactly one letter, no explanation.`) — now the default for `choice` | choice 0.29 → **0.47** |
 | **Regroup** 77 intents → 10 described groups (with the system prompt) | 77-way 0.025 → **0.523** (10-way; chance 0.10) |
 | Add per-group **descriptions** (with the system prompt) | 0.240 → **0.523** (McNemar p<0.001) |
-| **Pointwise** choice (score each option yes/no) vs one 77-way pick | 0.025 → **0.217** |
+| **Pointwise** choice (score each option yes/no) vs one 77-way pick | 0.8B: 0.025 → **0.217**; 35B-A3B: 0.682 → **0.484** (hurts) |
 | **Two-stage** (group → intent) | 0.025 → **0.164** (stage-1 group acc 0.532 caps it) |
 
 The system prompt helps `choice` (and IMDB `noul`) but **flips PubMedQA's yes/no prior**
@@ -249,7 +253,7 @@ Full detail: `SUMMARY.md`, `bench/`.
 llama-server -m model.gguf --port 8080 -np 4 -c 8192
 
 # 2. the wrapper — chat models work best with their own template + question-first
-JEV_MODE=chat JEV_QUESTION_FIRST=1 JEV_MAX_WORKERS=4 \
+JEV_QUESTION_FIRST=1 JEV_MAX_WORKERS=4 \
   python3 jev_server.py --llama-url http://127.0.0.1:8080 --port 8000
 
 # 3. ask a decision
@@ -280,12 +284,10 @@ Single-question convenience (no `questions` object):
 | env var | default | meaning |
 |---|---|---|
 | `JEV_LLAMA_URL` | `http://127.0.0.1:8080` | llama-server base URL |
-| `JEV_MODE` | `raw` | `chat` uses the model's template — **use this** for instruct models |
 | `JEV_QUESTION_FIRST` | `0` | `1` puts the question before a long state |
-| `JEV_CHOICE_STRATEGY` | `grammar` | `pointwise` scores each option (better for many options) |
 | `JEV_LETTERS` | `A..Z` | widen to `A-Za-z0-9` + symbols for up to ~79 single-token options |
 | `JEV_MAX_WORKERS` | `1` | parallel calls — keep ≤ llama-server `-np` |
-| `JEV_MODEL`, `JEV_HOST`, `JEV_PORT`, `JEV_API_KEY`, `JEV_N_PROBS`, `JEV_TIMEOUT`, `JEV_SYSTEM`, `JEV_THINKING`, `JEV_PROMPT_TEMPLATE`, `JEV_POINTWISE_INSTRUCTIONS` | | |
+| `JEV_MODEL`, `JEV_API_KEY`, `JEV_N_PROBS`, `JEV_TIMEOUT`, `JEV_SYSTEM`, `JEV_THINKING` | | |
 
 See the module docstring in `jev_server.py` for the full list.
 

@@ -40,6 +40,30 @@ import jev_server as jev
 # address up to 79 options, enough for Banking77's 77 intents.
 ALPHABET = string.ascii_uppercase + string.ascii_lowercase + string.digits + "!#$%&()*+/:;<=>?@"
 
+POINTWISE_INSTRUCTIONS = "Does this option describe what the state is about?"
+
+
+def pointwise_probs(state: str, instructions: str, options: list[str],
+                    cfg: jev.Config) -> list[float]:
+    """Per-option yes/no scoring, normalised into a distribution (bench-only).
+
+    The server is grammar-only; the pointwise technique lives here so the
+    Banking77 numbers stay reproducible. One noul call per option: P(match),
+    then normalise across options.
+    """
+    sub_q = {"type": "noul", "instructions": POINTWISE_INSTRUCTIONS,
+             "criteria": {"true": "the option matches", "false": "the option does not match"}}
+
+    def score(option: str) -> float:
+        sub_state = f"Question: {instructions}\nCandidate option: {option}\n\nState:\n{state}"
+        answer, _ = jev.answer_question(sub_state, sub_q, cfg)
+        return answer["noul"]
+
+    with ThreadPoolExecutor(max_workers=cfg.max_workers) as pool:
+        scores = list(pool.map(score, options))
+    total = sum(scores)
+    return [s / total for s in scores] if total > 0 else [1.0 / len(scores)] * len(scores)
+
 
 # --------------------------------------------------------------------------- #
 # Jevals metrics (validated to reproduce the published board)
@@ -112,14 +136,22 @@ def jev_scores(bench: str, loss_fn) -> dict[str, float]:
 # local model runs
 # --------------------------------------------------------------------------- #
 def run_local(items: list[tuple[str, int]], question: dict, cfg: jev.Config,
-              to_probs, workers: int) -> tuple[list[list[float]], list[int]]:
+              to_probs, workers: int, per_item=None) -> tuple[list[list[float]], list[int]]:
     def worker(item: tuple[str, int]):
         state, target = item
+        if per_item is not None:
+            return per_item(state), target
         answer, _ = jev.answer_question(state, question, cfg)
         return to_probs(answer), target
 
+    done = 0
+    results = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(worker, items))
+        for result in pool.map(worker, items):
+            results.append(result)
+            done += 1
+            if done % 25 == 0 or done == len(items):
+                print(f"  ... {done}/{len(items)} items", flush=True)
     return [p for p, _ in results], [t for _, t in results]
 
 
@@ -181,6 +213,8 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20260918)
     ap.add_argument("--tasks", default="pubmedqa,helpsteer2,choice")
     ap.add_argument("--choice-strategy", default="grammar", choices=["grammar", "pointwise"])
+    ap.add_argument("--dump-probs", default=None,
+                    help="choice only: write per-item probability vectors to this JSON")
     ap.add_argument("--out", default=os.path.join(DATA, "jev_comparison.json"))
     args = ap.parse_args()
 
@@ -215,20 +249,30 @@ def main() -> int:
         report["helpsteer2"] = {"local": grade(hs_probs, hs_targets, rps),
                                 "jev": jev_scores("helpsteer2", rps)}
 
-    # ---- choice / Banking77 (77 options via widened single-token alphabet) ----
+    # ---- choice / Banking77 (grammar: 77 options via widened single-token alphabet) ----
     if "choice" in tasks:
         bk_suite = json.load(open(os.path.join(SUITE, "banking77.json")))
         options = bk_suite["options"]
         bk_q = {"type": "choice", "instructions": bk_suite["instructions"],
                 "criteria": {o: "" for o in options}}
         bk_items, _ = load_banking77_aligned()
-        cfg_choice = replace(cfg, letters=ALPHABET[: len(options)], n_probs=256,
-                             choice_strategy=args.choice_strategy, max_workers=1)
+        cfg_choice = replace(cfg, letters=ALPHABET[: len(options)], n_probs=256, max_workers=1)
+        if args.choice_strategy == "pointwise":
+            # one yes/no call per option; items stay parallel via `workers`
+            runner = lambda state: pointwise_probs(state, bk_q["instructions"], options, cfg_choice)
+        else:
+            runner = None
         bk_probs, bk_targets = run_local(
             bk_items, bk_q, cfg_choice,
-            lambda a: [a["probabilities"].get(o, 0.0) for o in options], args.workers)
+            lambda a: [a["probabilities"].get(o, 0.0) for o in options], args.workers,
+            per_item=runner)
         report["banking77"] = {"local": grade(bk_probs, bk_targets, brier),
                                "jev": jev_scores("banking77", brier)}
+        if args.dump_probs:
+            with open(args.dump_probs, "w", encoding="utf-8") as handle:
+                json.dump({"probs": bk_probs, "targets": bk_targets, "options": options,
+                           "strategy": args.choice_strategy}, handle)
+            print(f"wrote per-item probs to {args.dump_probs}")
 
     # ---- print table ----
     print(f"\nJevals release {report['release']}  |  local model: Qwen3.5-0.8B via jev_server (chat, question-first)\n")

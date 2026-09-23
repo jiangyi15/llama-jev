@@ -103,6 +103,8 @@ def main() -> int:
     print(f"\nB) one long state, {args.n_questions} questions\n")
     record("B state-first,   cache ON",
            [build_prompt(long_state, q, ["yes", "no"], False) for q in questions], True)
+    record("B state-first,   cache OFF",
+           [build_prompt(long_state, q, ["yes", "no"], False) for q in questions], False)
     record("B question-first, cache ON",
            [build_prompt(long_state, q, ["yes", "no"], True) for q in questions], True)
     record("B question-first, cache OFF",

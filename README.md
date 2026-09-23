@@ -151,6 +151,28 @@ The wrapper accepts an optional `image` per question or at the top level
 
 For text-only decisions on non-vision models this stays inert.
 
+### KV-cache reuse — batching decisions on a shared state
+
+The wrapper sends `cache_prompt: true`, so llama.cpp reuses the KV for the longest shared
+prompt prefix. Measured on the 35B-A3B (sequential requests, one slot):
+
+| workload | ordering | cache | median |
+|---|---|---|---|
+| one state, 6 questions | **state-first** | **ON** | **113 ms** (3.7× vs OFF) |
+| one state, 6 questions | state-first | OFF | 417 ms |
+| one state, 6 questions | question-first | ON | 599 ms (~1.0× vs OFF) |
+| 40 states, same question | question-first | ON | 84.6 ms (overhead > savings) |
+| 40 states, same question | question-first | OFF | 69.8 ms |
+
+**Rule: put whatever the requests SHARE at the front** — the cache reuses the longest
+common token prefix, so the ordering should match the workload's shared structure:
+- **one state, many questions** (Jev's native shape) → state-first: the shared state sits
+  at the front and is processed once; each extra question costs only its tail (~3.7× here).
+- **one question, many items** (classification) → question-first: the shared question
+  prefix is reused; each item costs only its state.
+- The win scales with `shared_prefix / total_prompt` — a 1270-token shared state in a
+  1330-token prompt → 3.7×; a 115-token shared prefix in a 220-token prompt → ~1.0×.
+
 ### Calibration — is the probability trustworthy?
 
 Confidence = max probability; ECE = expected calibration error (validated against Jev's

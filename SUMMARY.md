@@ -231,6 +231,18 @@ Monotone, so it never changes the argmax — only the confidence.
 
 10. **Vision: a capability Jev doesn't have.** Qwen3-VL-2B + its mmproj projector accepts image input; the same grammar single-token probability readout works on images. Rendering customer messages to PNGs and classifying them into the 10 groups gives accuracy **0.75–0.775** at ~63 ms median (image encoding included) — comparable to text. Jev is text-only ("no image or audio input at launch"), so this is a genuine extension. (`bench/latency_image.py`)
 
+13. **KV-cache reuse: 3.7× on multi-question requests, with state-first ordering.**
+    The wrapper sends `cache_prompt: true`; llama.cpp reuses the KV for the longest shared
+    prompt prefix. One state (≈1270 tokens) + 6 questions, state-first: 113 ms vs 417 ms
+    per question (cache OFF). Question-first kills the reuse (599 ms ≈ OFF) because the
+    diverging question comes first. Same-question-many-states: no benefit (the per-item
+    state dominates and differs every time; cache bookkeeping adds slight overhead).
+    (`bench/prefix_cache.py`, measured on the 35B-A3B.)
+    General rule: **order the prompt so the shared part comes first** — the cache reuses
+    the longest common token prefix, so the win scales with `shared_prefix / total_prompt`
+    (long shared state in a long prompt → big win; small shared prefix in a short prompt →
+    the bookkeeping overhead roughly cancels the saving).
+
 ---
 
 ## 6. Implementation

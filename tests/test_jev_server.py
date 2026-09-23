@@ -137,13 +137,6 @@ class JevUnitTests(unittest.TestCase):
         )
 
     # -- prompt building --------------------------------------------------- #
-    def test_prompt_matches_requested_format(self):
-        prompt = jev.build_prompt("hello world", "Which team?", ["billing: pay", "tech: bug"], self.cfg)
-        self.assertIn("hello world", prompt)
-        self.assertIn("Which team? : A. billing: pay, B. tech: bug", prompt)
-        self.assertTrue(prompt.rstrip().endswith("results:"))
-
-    # -- choice ------------------------------------------------------------ #
     def test_choice_renormalises_and_picks_argmax(self):
         result = jev.handle_decisions(
             {
@@ -225,16 +218,10 @@ class JevUnitTests(unittest.TestCase):
 
     # -- grammar forcing -------------------------------------------------- #
 
-    def test_question_first_template_puts_question_first(self):
-        cfg = jev.Config(question_first=True)
-        prompt = jev.build_prompt("STATE", "Q?", ["a", "b"], cfg)
-        self.assertTrue(prompt.startswith("Q? : A. a, B. b"))
-        self.assertIn("STATE", prompt)
-
     def test_chat_mode_uses_model_template(self):
         cfg = jev.Config(
             llama_url=self.cfg.llama_url, model="test-jev",
-            mode="chat", question_first=True,
+            question_first=True,
         )
         result = jev.handle_decisions(
             {
@@ -249,18 +236,9 @@ class JevUnitTests(unittest.TestCase):
         self.assertIn("<chat>", StubLlama.requests_seen[0]["prompt"])
         self.assertEqual(StubLlama.requests_seen[0]["grammar"], "root ::= [AB]")
 
-    def test_image_requires_chat_mode(self):
-        cfg = jev.Config(llama_url=self.cfg.llama_url, model="test-jev", mode="raw")
-        with self.assertRaises(jev.BadRequest):
-            jev.handle_decisions(
-                {"state": "x", "image": "/tmp/ticket.png",
-                 "questions": {"q": {"type": "noul", "instructions": "urgent?",
-                                     "criteria": {"true": "", "false": ""}}}},
-                cfg)
-
     def test_image_propagates_to_messages(self):
         cfg = jev.Config(llama_url=self.cfg.llama_url, model="test-jev",
-                         mode="chat", question_first=True)
+                         question_first=True)
         result = jev.handle_decisions(
             {"state": "state text", "image": "data:image/png;base64,AAAA",
              "questions": {"q": {"type": "noul", "instructions": "Is it urgent?",

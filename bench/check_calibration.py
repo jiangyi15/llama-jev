@@ -136,7 +136,7 @@ def main() -> int:
     ap.add_argument("--out", default=os.path.join(DATA, "calibration.json"))
     args = ap.parse_args()
 
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=1)
     report_data: dict[str, object] = {}
 

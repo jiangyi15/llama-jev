@@ -268,6 +268,11 @@ The request/response shape is **Jev's** — `state` plus typed `choice` / `score
 questions returning probabilities. See the [Jev API docs](https://docs.typesafe.ai/) for the
 schema; this wrapper mirrors it. Interactive OpenAPI is at `/docs`.
 
+Single-question convenience (no `questions` object):
+```json
+{"state": "…", "question": "Which team?", "options": ["billing", "technical"]}
+```
+
 ---
 
 ## Tuning

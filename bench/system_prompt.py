@@ -84,7 +84,7 @@ def main() -> int:
     noul_q = {"type": "noul", "instructions": "Is this movie review positive?",
               "criteria": {"true": "positive", "false": "negative"}}
 
-    base = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    base = jev.Config(llama_url=args.llama_url, model="llama-jev",
                       question_first=True, max_workers=1)
 
     for task, items, question in (("choice (10 groups)", choice_items, choice_q),

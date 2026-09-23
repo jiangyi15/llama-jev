@@ -236,7 +236,6 @@ def main() -> int:
     parser.add_argument("--score-n", type=int, default=80)
     parser.add_argument("--max-chars", type=int, default=1500)
     parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--mode", default="raw", choices=["raw", "chat"])
     parser.add_argument("--question-first", action="store_true")
     parser.add_argument("--system", default="")
     parser.add_argument("--seed", type=int, default=0)
@@ -248,7 +247,6 @@ def main() -> int:
         llama_url=args.llama_url,
         model="llama-jev",
         timeout=120.0,
-        mode=args.mode,
         question_first=args.question_first,
         system_prompt=args.system,
     )

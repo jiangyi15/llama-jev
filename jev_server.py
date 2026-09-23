@@ -1,98 +1,12 @@
 #!/usr/bin/env python3
 """llama-jev: Jev-like structured decisions for ``llama-server`` (llama.cpp).
 
-Jev is TypeSafe AI's "System One" model: instead of generating prose it
-answers *typed* questions with calibrated probabilities.  This module exposes a
-small, Jev-shaped HTTP API and implements it locally by asking a
-``llama-server`` to emit exactly ONE token after a prompt of the form::
+One grammar-constrained token per decision; the next-token distribution over
+the option letters is the answer. Endpoints: ``POST /v1/systemone`` (alias
+``/api/v1/decisions``), ``GET /health``, ``GET /v1/models``, OpenAPI at ``/docs``.
 
-    <state>
-    <question> : A. <option1>, B. <option2>, ...
-    results:
-
-The generation is grammar-constrained to the declared option letters (e.g.
-``root ::= [ABC]``), so the single generated token is guaranteed to be a bare
-option letter.  The probability of each option is then read from the
-grammar-constrained, normalised token distribution returned by llama-server's
-native ``/completion`` endpoint (``post_sampling_probs``).  No chat endpoint is
-required and no text is generated for the caller.
-
-GBNF grammar support is required — any current llama-server build provides it;
-there is no fallback.
-
-Endpoints
----------
-``GET  /health``               liveness + backend info
-``GET  /v1/models``            minimal model listing
-``POST /v1/systemone``         Jev-style decisions (alias ``/api/v1/decisions``)
-
-Request body
-------------
-::
-
-    {
-      "model": "llama-jev",               # optional, echoed back
-      "state": "the text to decide about",
-      "questions": {
-        "route":   {"type": "choice", "instructions": "...",
-                    "criteria": {"billing": "Payments/refunds", "tech": "Bugs"}},
-        "urgency": {"type": "noul",   "instructions": "...",
-                    "criteria": {"true": "time-sensitive", "false": "can wait"}},
-        "sev":     {"type": "score",  "instructions": "...",
-                    "criteria": ["Low", "Medium", "High"]}
-      }
-    }
-
-Convenience: if ``questions`` is omitted but ``question`` + ``options`` are
-present, the body is treated as a single ``choice`` question keyed ``"answer"``.
-
-Response body
--------------
-::
-
-    {"model": "...", "answers": {...}, "usage": {"input_tokens": N, "output_tokens": M}}
-
-Environment
------------
-``JEV_LLAMA_URL``       base URL of llama-server        (default http://127.0.0.1:8080)
-``JEV_HOST``/``JEV_PORT`` bind address for this server  (default 0.0.0.0:8000)
-``JEV_MODEL``           model name echoed in responses  (default llama-jev)
-``JEV_API_KEY``         if set, require ``Authorization: Bearer <key>``
-``JEV_N_PROBS``         top-N token probs to request    (default 100)
-``JEV_TIMEOUT``         seconds per llama.cpp request   (default 120)
-``JEV_MAX_WORKERS``     parallel question calls         (default 1)
-``JEV_PROMPT_TEMPLATE`` template with {state} {question} {options} {letters}
-``JEV_LETTERS``         option labels (default A..Z; widen to ``A-Za-z0-9`` plus
-                        safe symbols for up to ~79 single-token options)
-``JEV_MODE``            ``raw`` plain completion or ``chat`` template (default raw)
-``JEV_QUESTION_FIRST``  ``1`` to put the question before the state (default 0)
-``JEV_SYSTEM``          chat system message. Default: a format guide for
-                        ``choice`` questions; set to override ("" disables).
-``JEV_CHOICE_STRATEGY`` ``grammar`` one pick, or ``pointwise`` score each option
-                        with a yes/no question and pick the highest (default grammar)
-``JEV_POINTWISE_INSTRUCTIONS`` match question used by the pointwise strategy
-
-Vision (capability Jev doesn't have): pass an ``image`` (data URL or file path) —
-per question or at the top level — with ``JEV_MODE=chat`` and a vision model
-loaded with ``--mmproj``. The same grammar single-token probability readout
-works on images:
-  {"state": "...", "image": "/tmp/ticket.png", "questions": {...}}
-``JEV_THINKING``        ``1`` to let reasoning models think first (default 0)
-``JEV_CHOICE_STRATEGY`` ``grammar`` one pick, or ``pointwise`` score each option
-                        with a yes/no question and pick the highest (default grammar)
-
-The HTTP layer is FastAPI (routes as decorators, OpenAPI at ``/docs``)::
-
-    python3 jev_server.py --llama-url http://127.0.0.1:8080 --port 8000
-    # or:  uvicorn jev_server:app --port 8000
-
-Then::
-
-    curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
-      "state": "I was billed twice and want a refund.",
-      "questions": {"route": {"type": "choice", "instructions": "Which team?",
-                    "criteria": {"billing": "payments", "technical": "bugs"}}}
-    }'
+Usage, configuration (env vars), capabilities (chat mode, images, pointwise,
+79-label alphabet) and the measured results: see ``README.md`` and ``SUMMARY.md``.
 """
 
 from __future__ import annotations
@@ -113,8 +27,6 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-DEFAULT_TEMPLATE = "{state}\n\n{question} : {options}\nresults:"
-QUESTION_FIRST_TEMPLATE = "{question} : {options}\n\n{state}\nresults:"
 # Default system prompt for chat mode (measured win); JEV_SYSTEM="" disables it.
 DEFAULT_CHAT_SYSTEM = "Classify the state. Output exactly one letter (A, B, C, ...). No explanation."
 DEFAULT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -146,9 +58,7 @@ class Config:
     n_probs: int = 100
     timeout: float = 120.0
     max_workers: int = 1
-    prompt_template: str = DEFAULT_TEMPLATE
     letters: str = DEFAULT_LETTERS
-    mode: str = "raw"              # "raw" (plain /completion) or "chat"
     question_first: bool = False   # put the question before the (long) state
     system_prompt: str | None = None  # chat system message; None = built-in default
     enable_thinking: bool = False  # disable reasoning for chat models
@@ -165,9 +75,7 @@ class Config:
             n_probs=int(env.get("JEV_N_PROBS", cls.n_probs)),
             timeout=float(env.get("JEV_TIMEOUT", cls.timeout)),
             max_workers=int(env.get("JEV_MAX_WORKERS", cls.max_workers)),
-            prompt_template=env.get("JEV_PROMPT_TEMPLATE", cls.prompt_template),
             letters=env.get("JEV_LETTERS", cls.letters),
-            mode=env.get("JEV_MODE", cls.mode).lower(),
             question_first=_truthy(env.get("JEV_QUESTION_FIRST", "0")),
             system_prompt=env.get("JEV_SYSTEM"),
             enable_thinking=_truthy(env.get("JEV_THINKING", "0")),
@@ -187,20 +95,6 @@ def _render_option(letter: str, text: str) -> str:
 
 def _render_options(letters: str, texts: list[str]) -> str:
     return ", ".join(_render_option(letters[i], texts[i]) for i in range(len(texts)))
-
-
-def build_prompt(state: str, question: str, options: list[str], cfg: Config) -> str:
-    """Render the raw single-token decision prompt for one question."""
-    letters = cfg.letters[: len(options)]
-    template = (QUESTION_FIRST_TEMPLATE
-                if cfg.question_first and cfg.prompt_template == DEFAULT_TEMPLATE
-                else cfg.prompt_template)
-    return template.format(
-        state=state,
-        question=question,
-        options=_render_options(letters, options),
-        letters=", ".join(letters),
-    )
 
 
 def build_chat_content(state: str, question: str, options: list[str], cfg: Config,
@@ -451,18 +345,10 @@ def _grammar(letters: str) -> str:
 
 
 def _render_prompt(state: str, q: ResolvedQuestion, cfg: Config) -> str:
-    if cfg.mode == "chat":
-        # A format-guiding system prompt helps choice a lot but shifts the yes/no
-        # prior on noul, so default it only for choice; JEV_SYSTEM overrides.
-        # When a system prompt carries the format rule, don't repeat it in the
-        # user message (the duplicate measurably hurts).
-        system = None
-        if cfg.system_prompt is None:
-            system = DEFAULT_CHAT_SYSTEM if q.qtype == "choice" else ""
-        instruction = "" if system else "Answer with a single letter."
-        content = build_chat_content(state, q.instructions, q.texts, cfg, instruction)
-        return apply_chat_template(content, cfg, system=system)
-    return build_prompt(state, q.instructions, q.texts, cfg)
+    """Render the user message with the model's own chat template."""
+    system, instruction = _system_and_instruction(q, cfg)
+    content = build_chat_content(state, q.instructions, q.texts, cfg, instruction)
+    return apply_chat_template(content, cfg, system=system)
 
 
 def _system_and_instruction(q: ResolvedQuestion, cfg: Config) -> tuple[str, str]:
@@ -549,8 +435,6 @@ def _pick_probs(state: str, q: ResolvedQuestion, cfg: Config) -> tuple[list[floa
     n = len(q.labels)
     if n > len(cfg.letters):
         raise BadRequest(f"too many options ({n}); increase JEV_LETTERS")
-    if q.image and cfg.mode != "chat":
-        raise BadRequest("'image' requires JEV_MODE=chat")
     n_probs = max(cfg.n_probs, n + 16)
     grammar = _grammar(cfg.letters[:n])
 

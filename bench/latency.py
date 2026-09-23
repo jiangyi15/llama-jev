@@ -74,7 +74,7 @@ def main() -> int:
     rows = [json.loads(l) for l in open(os.path.join(DATA, "banking77_test.jsonl"), encoding="utf-8")]
     random.Random(0).shuffle(rows)
     rows = rows[: args.n]
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=1)
 
     short_q = {"type": "noul", "instructions": "Is this request urgent?",

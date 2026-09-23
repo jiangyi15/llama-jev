@@ -48,7 +48,7 @@ def main() -> int:
     neg_t = [r for r in imdb if r["label"] == 0][:half]
     noul_items = [(" ".join(r["text"].split())[:1500], int(r["label"])) for r in pos_t + neg_t]
 
-    cfg = jev.Config(llama_url="http://127.0.0.1:8080", model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url="http://127.0.0.1:8080", model="llama-jev",
                      question_first=True, max_workers=1)
 
     choice_instr = "Which category best describes the customer's request?"

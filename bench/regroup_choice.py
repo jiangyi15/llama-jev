@@ -113,7 +113,7 @@ def main() -> int:
     pos = {g: i for i, g in enumerate(groups)}
     items = [(" ".join(r["text"].split())[:1500], pos[INTENT_TO_GROUP[r["label_text"]]]) for r in rows]
 
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=1)
 
     def evaluate(described: bool) -> tuple[np.ndarray, float]:

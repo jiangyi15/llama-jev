@@ -56,7 +56,7 @@ def main() -> int:
     rows = rows[: args.n]
     items = [(" ".join(r["text"].split())[:1500], r["label_text"]) for r in rows]
 
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=1)
 
     def work(item):

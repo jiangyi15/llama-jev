@@ -184,7 +184,7 @@ def main() -> int:
     ap.add_argument("--out", default=os.path.join(DATA, "jev_comparison.json"))
     args = ap.parse_args()
 
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=args.workers)
 
     report: dict[str, Any] = {"release": "2026-09-18", "llama_url": args.llama_url}

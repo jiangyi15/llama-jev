@@ -252,6 +252,10 @@ Monotone, so it never changes the argmax — only the confidence.
 
 ## 6. Implementation
 
+Raw mode was **removed**: it measured near-chance on instruct models (finding 2), so
+the server is chat-only — prompts always go through the model's own chat template via
+``/apply-template``.
+
 Engine split into four stages (`jev_server.py`):
 
 ```

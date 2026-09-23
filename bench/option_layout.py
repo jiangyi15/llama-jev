@@ -77,7 +77,7 @@ def main() -> int:
     noul_q = {"type": "noul", "instructions": "Is this movie review positive?",
               "criteria": {"true": "positive", "false": "negative"}}
 
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=1)
 
     original = jev._render_options

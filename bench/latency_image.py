@@ -91,7 +91,7 @@ def main() -> int:
         "instructions": "Which category best describes the customer's request?",
         "criteria": {g: GROUPS[g][1] for g in groups},
     }
-    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev", mode="chat",
+    cfg = jev.Config(llama_url=args.llama_url, model="llama-jev",
                      question_first=True, max_workers=1)
 
     items = []

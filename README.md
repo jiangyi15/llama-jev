@@ -69,6 +69,7 @@ sample (n=500) for the 0.8B/2B rows; the 35B rows are on the **item-exact boards
 | metric | 0.8B | 2B | VL-4B | **35B-A3B (MoE)** |
 |---|---|---|---|---|
 | choice, 10 groups (described) | 0.523 | 0.724 | **0.766** | **0.807** (chance 0.10) |
+| choice, 77-way (Banking77 full board) | 0.025 | 0.025* | — | **0.527** (chance 0.013) |
 | PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.733** | **0.787** |
 | HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.443** | **0.427** |
 | PubMedQA Decision Score | 4.11 | −21.67 | **0.11** | **39.07** |
@@ -83,6 +84,10 @@ prompting, no decision training. And the **dense VL-4B beats the same-size hybri
 (Qwen3.5-4B)** on both accuracy (0.766 vs 0.736) and latency (65 vs 131 ms/item) —
 on llama.cpp today, dense transformers are the right pick; the hybrid arch costs
 speed without buying quality at this scale.
+
+The VL-4B also runs the **full 77-way Banking77 board** via the widened single-token
+alphabet (79 labels) — accuracy 0.527, 40x chance, Decision Score +19.7: no regrouping
+needed.
 
 The **VL-4B on the item-exact boards**: PubMedQA accuracy 0.733 (best local), HelpSteer2
 **0.443 — above Jev's 0.410** — and choice K=5 at **0.920** (ECE 4.4, well-calibrated).

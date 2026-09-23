@@ -73,10 +73,12 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | Mercury 2.5 | 54.01 | 70.3% |
 | **llama-jev + Qwen3.5-0.8B (listwise)** | **−8.14** | **2.5%** |
 | **llama-jev + Qwen3.5-0.8B (pointwise)** | **0.12** | **21.7%** |
+| **llama-jev + Qwen3-VL-4B (77-way, 79-label alphabet)** | **19.65** | **52.7%** |
 | chance | 0 | 1.3% |
 
-Note: the VL-4B was **not** run on the 77-way board (our grouped-10-way variant reached
-0.766 accuracy at n=500, but that is the grouped task, not comparable to 77-way).
+The VL-4B's 77-way run uses the widened single-token alphabet (A-Z a-z 0-9 + safe
+symbols = 79 labels), so the full board runs without regrouping — 40x chance, and a
+positive Decision Score where the 0.8B was below chance.
 
 **Latency:** see the table below.
 

@@ -173,6 +173,20 @@ common token prefix, so the ordering should match the workload's shared structur
 - The win scales with `shared_prefix / total_prompt` — a 1270-token shared state in a
   1330-token prompt → 3.7×; a 115-token shared prefix in a 220-token prompt → ~1.0×.
 
+- The win scales with `shared_prefix / total_prompt` — a 1270-token shared state in a
+  1330-token prompt → 3.7×; a 115-token shared prefix in a 220-token prompt → ~1.0×.
+
+Same effect on the **classification shape** (one question, 60 different items, 10 described
+groups — a ~450-token shared prefix, 35B-A3B):
+
+| ordering | median | wall/item |
+|---|---|---|
+| **question-first** (shared prefix reused) | **83 ms** | **120 ms** |
+| state-first (shared prefix recomputed per item) | 354 ms | 379 ms |
+
+Note: the reported `tokens_evaluated` is the nominal prompt length in both cases — the
+latency is the only honest signal of the reuse.
+
 ### Calibration — is the probability trustworthy?
 
 Confidence = max probability; ECE = expected calibration error (validated against Jev's

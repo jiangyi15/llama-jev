@@ -238,6 +238,11 @@ Monotone, so it never changes the argmax — only the confidence.
     diverging question comes first. Same-question-many-states: no benefit (the per-item
     state dominates and differs every time; cache bookkeeping adds slight overhead).
     (`bench/prefix_cache.py`, measured on the 35B-A3B.)
+    The same effect on the classification shape (one question, 60 different items, 10
+    described groups — a ~450-token shared prefix): question-first **83 ms vs 354 ms**
+    median (state-first recomputes the shared prefix per item, 4.3× slower). The reported
+    `tokens_evaluated` is the nominal prompt length either way — the latency is the honest
+    signal of the reuse.
     General rule: **order the prompt so the shared part comes first** — the cache reuses
     the longest common token prefix, so the win scales with `shared_prefix / total_prompt`
     (long shared state in a long prompt → big win; small shared prefix in a short prompt →

@@ -38,11 +38,11 @@ prior, 100 = perfect), recomputed from [Jevals' published release](https://jeval
 
 | | |
 |---|---|
-| model | [Qwen3.5-0.8B](https://modelscope.cn/models/unsloth/Qwen3.5-0.8B-GGUF/) (base `Qwen/Qwen3.5-0.8B`) — 0.8B params, vision-language, hybrid Gated Delta Net + sparse MoE |
+| model | [Qwen3.5-0.8B](https://modelscope.cn/models/unsloth/Qwen3.5-0.8B-GGUF/) (base `Qwen/Qwen3.5-0.8B`) — 0.8B params, vision-language, hybrid Gated Delta Net architecture (dense, no MoE at this size) |
 | GGUF | unsloth **Unsloth Dynamic 2.0**, quant **`UD-Q4_K_XL`** (~4-bit, extra precision on key layers) — **559 MB** |
 | GPU | NVIDIA GeForce RTX 3070 Ti **Laptop**, 8 GB (Ampere, CC 8.6), driver 595.84 |
 | CPU | AMD Ryzen 7 6800H (16 threads) |
-| runtime | llama.cpp `b8818-b572d1ecd`, 4 slots, `-c 8192` |
+| runtime | llama.cpp `b8818-b572d1ecd`, 4 slots, `-c 32768` (8192/slot) |
 
 Single call per decision, `chat` mode + question-first.
 
@@ -59,7 +59,7 @@ Single call per decision, `chat` mode + question-first.
 300/300 (reconstructed from the HF revision by `state_sha256`), Banking77 277/300 aligned.)*
 
 **Bottom line:** the mechanics reproduce Jev, the *decisions* do not. A 0.8B model is far
-below Jev and every frontier LLM — but it is **~8× faster**.
+below Jev and every frontier LLM — but it is **~7× faster** (61 vs 438 ms median).
 
 ### Scaling the model: 0.8B → 2B → 4B → 35B-A3B
 
@@ -69,12 +69,12 @@ sample (n=500) for the 0.8B/2B rows; the 35B rows are on the **item-exact boards
 | metric | 0.8B | 2B | VL-4B | **9B (hybrid)** | **35B-A3B (MoE)** |
 |---|---|---|---|---|
 | choice, 10 groups (described) | 0.523 | 0.724 | **0.766** | **0.757** | **0.807** (chance 0.10) |
-| choice, 77-way (Banking77 full board) | 0.025 | not run | **0.527** | **0.682** (chance 0.013) |
+| choice, 77-way (Banking77 full board) | 0.025 | not run | **0.527** | not run | **0.682** (chance 0.013) |
 | PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.733** | **0.787** | **0.787** |
 | HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.443** | **0.423** | **0.427** |
 | PubMedQA Decision Score | 4.11 | −21.67 | **0.11** | **43.19** | **39.07** |
-| HelpSteer2 Decision Score | −2.56 | −33.74 | **−39.61** | **−1.16** |
-| two-stage, end-to-end | 0.164 | 0.461 | not run | **0.461** | not run |
+| HelpSteer2 Decision Score | −2.56 | −33.74 | **−39.61** | **−2.69** | **−1.16** |
+| two-stage, end-to-end | 0.164 | 0.461 | not run | not run | not run |
 
 *(Jev on the same boards: PubMedQA 0.913 / 69.06, HelpSteer2 0.410 / 9.28, Banking77 0.797 / 67.79.)*
 
@@ -89,14 +89,18 @@ The VL-4B also runs the **full 77-way Banking77 board** via the widened single-t
 alphabet (79 labels) — accuracy 0.527, 40x chance, Decision Score +19.7: no regrouping
 needed.
 
-The **VL-4B on the item-exact boards**: PubMedQA accuracy 0.733 (best local), HelpSteer2
+**The VL-4B on the item-exact boards**: PubMedQA accuracy 0.733 (best local), HelpSteer2
 **0.443 — above Jev's 0.410** — and choice K=5 at **0.920** (ECE 4.4, well-calibrated).
 Its raw confidences are heavily overconfident though (mean 0.95+), so its **Decision
 Scores collapse** (−39.6 on HelpSteer2) until a single Platt parameter is fitted:
-HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_probs.py`). Decision Score still trails (−1.2 vs 9.3 on HelpSteer2)
-because its confidence is a bit overconfident; and its 77-way intent knowledge was never
-trained. Latency: ~1.3–1.6 s/decision on this laptop (only 10/40 layers fit in the 8 GB GPU;
-a desktop GPU would change this) — still slower than Jev's ~440 ms median.
+HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_probs.py`).
+
+**The 35B-A3B on the item-exact boards**: PubMedQA **0.787 / DS 39.07**, HelpSteer2
+0.427 / −1.16 — and on the full 77-way Banking77 board (79-label alphabet) it reaches
+**0.682 / DS 50.75**, between Mercury 2.5 and Qwen3.8 Flash. Latency: ~1.3–1.6 s per
+decision on this laptop (only 10/40 layers fit in the 8 GB GPU; a desktop GPU would
+change this) — still slower than Jev's ~440 ms median, because the MoE weights are
+CPU-offloaded on this 8 GB card.
 
 **Scale buys accuracy, not calibration.** The 2B is far more accurate but its raw softmax is
 wildly overconfident (mean confidence 0.92 at 0.62 accuracy), so the Decision Score *falls*
@@ -173,9 +177,6 @@ common token prefix, so the ordering should match the workload's shared structur
 - The win scales with `shared_prefix / total_prompt` — a 1270-token shared state in a
   1330-token prompt → 3.7×; a 115-token shared prefix in a 220-token prompt → ~1.0×.
 
-- The win scales with `shared_prefix / total_prompt` — a 1270-token shared state in a
-  1330-token prompt → 3.7×; a 115-token shared prefix in a 220-token prompt → ~1.0×.
-
 Same effect on the **classification shape** (one question, 60 different items, 10 described
 groups — a ~450-token shared prefix, 35B-A3B):
 
@@ -225,10 +226,10 @@ default **only to `choice`**. Override with `JEV_SYSTEM` (`""` disables).
 > showed the format-guiding system prompt and the option-layout effects **disappear**
 > (all variants within noise), and the first-option bias is **absent** (option #0 picked
 > 7% vs 46-80% on the 0.8B). Every number here is measured on Qwen3.5-0.8B Q4 with its
-> **Qwen3.5-0.8B Q4** with its own chat template. A different model — size, family, chat
-> template, or quant — may prefer a **different** system prompt, option label style, or
-> layout (some models may even do worse with the format guide). Treat these as a method and a
-> starting point, not universal constants: re-measure on your own model with `bench/`.
+> own chat template. A different model — size, family, chat template, or quant — may
+> prefer a **different** system prompt, option label style, or layout (some models may
+> even do worse with the format guide). Treat these as a method and a starting point,
+> not universal constants: re-measure on your own model with `bench/`.
 
 Two consistent failure modes on many-option tasks:
 - **First-option / label bias** — with 20–77 options the model picks by *position*, not
@@ -300,7 +301,7 @@ JEV_SYSTEM="Classify the state. Output exactly one letter (A, B, C, ...). No exp
 |---|---|
 | `jev_server.py` | the wrapper (engine + FastAPI app) |
 | `simple_jev.py` | minimal read-only reference (~40 lines) |
-| `tests/test_jev_server.py` | 19 tests with a stub llama-server |
+| `tests/test_jev_server.py` | 22 tests with a stub llama-server |
 | `bench/` | benchmarks, Jev comparison, calibration (see `bench/README`-style docstrings) |
 | `data/` | datasets, `jevals-data`, result JSONs |
 | `SUMMARY.md` | design notes + full benchmark/calibration detail |

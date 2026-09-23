@@ -66,15 +66,15 @@ below Jev and every frontier LLM — but it is **~8× faster**.
 Same wrapper, same prompts, different base models. Accuracy on the balanced calibration
 sample (n=500) for the 0.8B/2B rows; the 35B rows are on the **item-exact boards** above.
 
-| metric | 0.8B | 2B | VL-4B | **35B-A3B (MoE)** |
+| metric | 0.8B | 2B | VL-4B | **9B (hybrid)** | **35B-A3B (MoE)** |
 |---|---|---|---|---|
-| choice, 10 groups (described) | 0.523 | 0.724 | **0.766** | **0.807** (chance 0.10) |
+| choice, 10 groups (described) | 0.523 | 0.724 | **0.766** | **0.757** | **0.807** (chance 0.10) |
 | choice, 77-way (Banking77 full board) | 0.025 | not run | **0.527** | **0.682** (chance 0.013) |
-| PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.733** | **0.787** |
-| HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.443** | **0.427** |
-| PubMedQA Decision Score | 4.11 | −21.67 | **0.11** | **39.07** |
+| PubMedQA `noul` acc — item-exact 300, paired w/ Jev | 0.640 | 0.680 | **0.733** | **0.787** | **0.787** |
+| HelpSteer2 acc — item-exact 300, paired w/ Jev | 0.310 | 0.377 | **0.443** | **0.423** | **0.427** |
+| PubMedQA Decision Score | 4.11 | −21.67 | **0.11** | **43.19** | **39.07** |
 | HelpSteer2 Decision Score | −2.56 | −33.74 | **−39.61** | **−1.16** |
-| two-stage, end-to-end | 0.164 | 0.461 | not run | not run |
+| two-stage, end-to-end | 0.164 | 0.461 | not run | **0.461** | not run |
 
 *(Jev on the same boards: PubMedQA 0.913 / 69.06, HelpSteer2 0.410 / 9.28, Banking77 0.797 / 67.79.)*
 
@@ -115,6 +115,7 @@ Median / p95 per decision. Jev/LLM figures are from the `seconds` field of Jeval
 | **llama-jev + Qwen3-VL-2B** | **27 / 31 ms** | **27 / 35 ms** |
 | **llama-jev + Qwen3-VL-4B** | 76 / 91 ms | 62 / 85 ms |
 | **llama-jev + Qwen3.5-4B (hybrid)** | 102 / 113 ms | 131 / 134 ms |
+| **llama-jev + Qwen3.5-9B** | 196 / 222 ms | 262 / 274 ms |
 | **llama-jev + Qwen3.5-0.8B** | 61 / 74 ms | 65 / 68 ms |
 | Jev | 438 / 653 ms | 467 / 693 ms |
 | Mercury 2.5 (fastest LLM) | 584 / 1037 ms | 639 / 1507 ms |

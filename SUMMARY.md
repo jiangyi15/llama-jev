@@ -47,6 +47,7 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | DeepSeek V4.1 Flash | 47.50 | 83.7% |
 | **llama-jev + Qwen3.5-0.8B** | **4.11** | **64.0%** |
 | **llama-jev + Qwen3-VL-4B** | **0.11** | **73.3%** |
+| **llama-jev + Qwen3.5-9B (hybrid)** | **43.19** | **78.7%** |
 
 ### score — HelpSteer2 (exact same 300 items)
 | system | Decision Score | accuracy |
@@ -57,6 +58,7 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | Qwen3.8 Flash | −1.43 | 36.1% |
 | **llama-jev + Qwen3.5-0.8B** | **−2.56** | **31.0%** |
 | **llama-jev + Qwen3-VL-4B** | **−39.61** | **44.3%** |
+| **llama-jev + Qwen3.5-9B (hybrid)** | **−2.69** | **42.3%** |
 | Mercury 2.5 | −5.55 | 41.7% |
 | Mistral Medium 3.5 | −13.73 | 43.9% |
 | DeepSeek V4.1 Flash | −19.04 | 34.7% |
@@ -199,6 +201,9 @@ Monotone, so it never changes the argmax — only the confidence.
    choice 10-group **0.766** vs 0.736 at **65 vs 131 ms/item** — on llama.cpp today the
    dense transformer path is the right pick; the hybrid arch costs speed without buying
    quality at this scale.
+   The **Qwen3.5-9B hybrid** (dense-hybrid, 6 GB, fully on GPU, ~200-260 ms/decision)
+   matches the 35B-A3B MoE on both boards: PubMedQA **0.787 / DS 43.2**, HelpSteer2
+   **0.423 / DS −2.7** — the best quality-per-resource of any local model here.
    The **35B-A3B MoE** (`Qwen3.6-35B-A3B UD-IQ4_NL`, item-exact boards, paired) closes
    most of the accuracy gap with zero training: PubMedQA **0.787** acc / **DS 39.1**
    (Jev 0.913 / 69.1), HelpSteer2 **0.427** acc (Jev 0.410) at ~1.4 s/decision on this

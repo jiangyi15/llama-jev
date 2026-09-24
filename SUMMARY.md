@@ -76,8 +76,8 @@ A second model was also measured: [Qwen3-VL-2B-Instruct-1M IQ4_NL](https://model
 | **llama-jev + Qwen3.5-0.8B (listwise)** | **−8.14** | **2.5%** |
 | **llama-jev + Qwen3.5-0.8B (pointwise)** | **0.12** | **21.7%** |
 | **llama-jev + Qwen3-VL-4B (77-way, 79-label alphabet)** | **19.65** | **52.7%** |
+| **llama-jev + Qwen3-VL-4B (pointwise)** | 15.79 | 48.4% |
 | **llama-jev + Qwen3.6-35B-A3B (77-way, 79-label alphabet)** | **50.75** | **68.2%** |
-| **llama-jev + Qwen3.6-35B-A3B (pointwise)** | 15.79 | 48.4% |
 | chance | 0 | 1.3% |
 
 The VL-4B's 77-way run uses the widened single-token alphabet (A-Z a-z 0-9 + safe
@@ -174,15 +174,15 @@ Monotone, so it never changes the argmax — only the confidence.
 4. **Option count matters, but isn't the root cause.** top-1 by K: 0.40 (K=5), 0.15 (K=10),
    0.10 (K=20/40), 0.00 (K=77); even K=5 is only 2× chance.
 
-5. **Pointwise beats listwise for many options — but only on small models.** Score each option
-   with a binary yes/no and take the max: Banking77 0.025 → **0.217** on the 0.8B, where the
-   77-way pick collapses to first-option bias. Binary beats ordinal levels (top-1 0.35 vs
-   0.05–0.15 on a 20-item dev set). Re-measured on the **35B-A3B**: pointwise *hurts* —
-   0.484 acc / DS 15.8 vs 0.682 / 50.75 listwise. Its normalised distribution stays flat
-   (mean confidence 0.20, vs 0.80 listwise) and sharpening recovers little (split-half
-   β fit: DS 18.0 held-out), even though the raw binary scores separate gold from
-   non-gold 14×. At scale the joint pick outranks isolated yes/no calls; pointwise is a
-   small-model crutch. Ranking improves over a broken baseline; calibration stays poor.
+5. **Pointwise beats listwise for many options — but only where listwise is broken.** Score each
+   option with a binary yes/no and take the max: Banking77 0.025 → **0.217** on the 0.8B, where
+   the 77-way pick collapses to first-option bias. Binary beats ordinal levels (top-1 0.35 vs
+   0.05–0.15 on a 20-item dev set). Re-measured on the **Qwen3-VL-4B** (no first-option bias):
+   pointwise still *loses* to the joint pick — 0.484 / DS 15.8 vs 0.527 / 19.65 listwise. Its
+   normalised distribution stays flat (mean confidence 0.20, vs 0.87 listwise) and sharpening
+   recovers little (split-half β fit: DS 18.0 held-out), even though the raw binary scores
+   separate gold from non-gold 14×. Ranking improves over a broken baseline; calibration stays
+   poor. (35B-A3B pointwise re-measurement pending.)
 
 6. **Regrouping is the biggest structural win.** 77 intents → 10 thematic groups
    (with the choice system prompt): bare names **0.240**, with descriptions **0.523**

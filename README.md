@@ -94,6 +94,10 @@ needed.
 Its raw confidences are heavily overconfident though (mean 0.95+), so its **Decision
 Scores collapse** (−39.6 on HelpSteer2) until a single Platt parameter is fitted:
 HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_probs.py`).
+Pointwise choice (per-option yes/no) on the 77-way board: **0.484 / DS 15.8 vs
+0.527 / 19.65 listwise** — even without first-option bias, isolated binary calls rank
+worse than the joint pick (flat normalised distribution, mean confidence 0.20;
+sharpening recovers only DS ≈ 18).
 
 **The 35B-A3B on the item-exact boards**: PubMedQA **0.787 / DS 39.07**, HelpSteer2
 0.427 / −1.16 — and on the full 77-way Banking77 board (79-label alphabet) it reaches
@@ -106,11 +110,6 @@ and `-ngl` scales at ~414 MiB/layer — **16/40 layers is the hard ceiling** her
 `-np 1 -c 4096` with 31 MiB spare and then dies with CUDA OOM on the first
 real inference, at any other `-np`/`-c` it fails to allocate at all, while `-np` does not affect single-stream latency. Still slower than
 Jev's ~440 ms median, because the MoE weights are CPU-offloaded on this 8 GB card.
-Pointwise (per-option yes/no) was re-checked here and
-**hurts at this scale**: 0.484 acc / DS 15.8 vs 0.682 / 50.75 listwise — its flat
-normalised distribution (mean confidence 0.20) wastes the Brier score, and isolated
-binary calls rank worse than the joint 77-way pick (sharpening recovers only
-DS ≈ 18). Pointwise is a small-model crutch, not a general strategy.
 
 **Scale buys accuracy, not calibration.** The 2B is far more accurate but its raw softmax is
 wildly overconfident (mean confidence 0.92 at 0.62 accuracy), so the Decision Score *falls*
@@ -224,7 +223,7 @@ cuts ECE 2–20× (PubMedQA 13.7 → 5.3, IMDB 15.3 → 3.9, HelpSteer2 4.9 → 
 | **Format-guiding system prompt** (`Output exactly one letter, no explanation.`) — now the default for `choice` | choice 0.29 → **0.47** |
 | **Regroup** 77 intents → 10 described groups (with the system prompt) | 77-way 0.025 → **0.523** (10-way; chance 0.10) |
 | Add per-group **descriptions** (with the system prompt) | 0.240 → **0.523** (McNemar p<0.001) |
-| **Pointwise** choice (score each option yes/no) vs one 77-way pick | 0.8B: 0.025 → **0.217**; 35B-A3B: 0.682 → **0.484** (hurts) |
+| **Pointwise** choice (score each option yes/no) vs one 77-way pick | 0.8B: 0.025 → **0.217** (rescues bias); VL-4B: 0.527 → **0.484** (hurts) |
 | **Two-stage** (group → intent) | 0.025 → **0.164** (stage-1 group acc 0.532 caps it) |
 
 The system prompt helps `choice` (and IMDB `noul`) but **flips PubMedQA's yes/no prior**

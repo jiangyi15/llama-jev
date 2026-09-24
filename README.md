@@ -97,10 +97,13 @@ HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_prob
 
 **The 35B-A3B on the item-exact boards**: PubMedQA **0.787 / DS 39.07**, HelpSteer2
 0.427 / −1.16 — and on the full 77-way Banking77 board (79-label alphabet) it reaches
-**0.682 / DS 50.75**, between Mercury 2.5 and Qwen3.8 Flash. Latency: ~1.3–1.6 s per
-decision on this laptop (only 10/40 layers fit in the 8 GB GPU; a desktop GPU would
-change this) — still slower than Jev's ~440 ms median, because the MoE weights are
-CPU-offloaded on this 8 GB card. Pointwise (per-option yes/no) was re-checked here and
+**0.682 / DS 50.75**, between Mercury 2.5 and Qwen3.8 Flash. Latency: ~1.1–1.3 s per
+decision with `--no-mmap` (measured: noul 0.81 s, 10-choice 1.14 s median — `--no-mmap`
+is ~10% faster than mmap for a CPU-offloaded MoE, whose sparse expert access otherwise
+keeps faulting pages in; `-np` does not affect single-stream latency) on this laptop
+(only 10/40 layers fit in the 8 GB GPU; a desktop GPU would change this) — still slower
+than Jev's ~440 ms median, because the MoE weights are CPU-offloaded on this 8 GB card.
+Pointwise (per-option yes/no) was re-checked here and
 **hurts at this scale**: 0.484 acc / DS 15.8 vs 0.682 / 50.75 listwise — its flat
 normalised distribution (mean confidence 0.20) wastes the Brier score, and isolated
 binary calls rank worse than the joint 77-way pick (sharpening recovers only

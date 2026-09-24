@@ -97,12 +97,15 @@ HelpSteer2 ECE 53.8 → 1.4, choice K=10 ECE 29.5 → 5.5 (`bench/calibrate_prob
 
 **The 35B-A3B on the item-exact boards**: PubMedQA **0.787 / DS 39.07**, HelpSteer2
 0.427 / −1.16 — and on the full 77-way Banking77 board (79-label alphabet) it reaches
-**0.682 / DS 50.75**, between Mercury 2.5 and Qwen3.8 Flash. Latency: ~1.1–1.3 s per
-decision with `--no-mmap` (measured: noul 0.81 s, 10-choice 1.14 s median — `--no-mmap`
-is ~10% faster than mmap for a CPU-offloaded MoE, whose sparse expert access otherwise
-keeps faulting pages in; `-np` does not affect single-stream latency) on this laptop
-(only 10/40 layers fit in the 8 GB GPU; a desktop GPU would change this) — still slower
-than Jev's ~440 ms median, because the MoE weights are CPU-offloaded on this 8 GB card.
+**0.682 / DS 50.75**, between Mercury 2.5 and Qwen3.8 Flash. Latency: ~0.7–1.0 s per
+decision with `--no-mmap -ngl 16` (measured: noul 0.69 s, 10-choice 0.98 s median).
+Two memory findings for CPU-offloading an MoE on an 8 GB card: `--no-mmap` is ~10%
+faster than mmap (resident weights avoid page-fault churn from sparse expert access),
+and `-ngl` scales at ~414 MiB/layer — **16/40 layers is the hard ceiling** here
+(7.4 GiB weights+KV+compute of 7.66 GiB usable); ngl 17 only *loads* at
+`-np 1 -c 4096` with 31 MiB spare and then dies with CUDA OOM on the first
+real inference, at any other `-np`/`-c` it fails to allocate at all, while `-np` does not affect single-stream latency. Still slower than
+Jev's ~440 ms median, because the MoE weights are CPU-offloaded on this 8 GB card.
 Pointwise (per-option yes/no) was re-checked here and
 **hurts at this scale**: 0.484 acc / DS 15.8 vs 0.682 / 50.75 listwise — its flat
 normalised distribution (mean confidence 0.20) wastes the Brier score, and isolated
